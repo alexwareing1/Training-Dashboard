@@ -1,0 +1,18 @@
+# --- Secrets: never commit ---
+.hevy-api-key
+
+# --- Local Python environment ---
+.venv/
+
+# --- macOS / editor cruft ---
+.DS_Store
+*.swp
+*~
+
+# --- Backups / scratch ---
+*.bak
+*.tmp
+hevyexportfullhistory.csv.tmp
+
+# Personal raw workout history - the data is already baked into index.html
+hevyexportfullhistory.csv

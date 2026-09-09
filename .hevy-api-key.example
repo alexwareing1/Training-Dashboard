@@ -1,0 +1,4 @@
+# Copy this file to ".hevy-api-key" (same folder) and put your
+# Hevy Pro API key on the first line. Get it at https://hevy.com/settings?developer
+# .hevy-api-key is gitignored; this .example file is safe to commit.
+PASTE_YOUR_KEY_HERE
