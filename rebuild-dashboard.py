@@ -4,6 +4,7 @@ Rebuilds index.html from:
   1. hevy-export-full-history.csv        - the frozen Hevy export (base history)
   2. new-workouts-not-yet-in-export.md   - sessions logged by hand since that export
   3. dashboard-page-template.html
+  4. metric-*.csv                       - optional side metrics (see load_metric_files)
 
 Usage:  python3 rebuild-dashboard.py
 Everything is keyed on session date. If a date appears in both the CSV and the
@@ -20,6 +21,33 @@ def find(pattern):
         hits = sorted(glob.glob(os.path.join(d, pattern)))
         if hits: return hits[0]
     return None
+
+def load_metric_files():
+    """metric-<name>.csv files in this folder: plain 'date,value' rows, no
+    header, one entry per line (see sync-hevy.py's sync_bodyweight for a
+    writer that matches this format). Each file becomes one series keyed by
+    the name between 'metric-' and '.csv' - e.g. metric-bodyweight-kg.csv
+    becomes 'bodyweight-kg'."""
+    out = {}
+    for path in sorted(glob.glob(os.path.join(HERE, 'metric-*.csv'))):
+        key = os.path.splitext(os.path.basename(path))[0][len('metric-'):]
+        rows = []
+        with open(path, encoding='utf-8-sig') as f:
+            for ln, line in enumerate(f, 1):
+                line = line.strip()
+                if not line: continue
+                parts = line.split(',')
+                if len(parts) != 2:
+                    print(f'  ! {os.path.basename(path)} line {ln}: could not read "{line[:60]}"', file=sys.stderr)
+                    continue
+                d, v = (p.strip() for p in parts)
+                try:
+                    rows.append({'date': d, 'v': round(float(v), 1)})
+                except ValueError:
+                    print(f'  ! {os.path.basename(path)} line {ln}: bad value "{v}"', file=sys.stderr)
+        rows.sort(key=lambda r: r['date'])
+        out[key] = rows
+    return out
 
 def read_csv(path):
     """Uploads sometimes gain a stray first line holding the file name.
@@ -373,6 +401,7 @@ payload={
  'cardio':[{'date':str(r.date),'ex':r.exercise_title,
    'mins':round(float(r.secs)/60,1) if pd.notna(r.secs) and r.secs else None,
    'km':float(r.km) if pd.notna(r.km) and r.km else None} for r in cardio.itertuples()],
+ 'metrics':load_metric_files(),
 }
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 open(OUT,'w').write(open(TPL).read().replace('__DATA__', json.dumps(payload)))
@@ -384,3 +413,5 @@ print(f'  overall index {overall[0]["value"]} -> {overall[-1]["value"]}')
 print('  by group: ' + ', '.join(
     f'{g} {group_index[g][-1]["sm"]:.0f}' for g in group_index))
 if flags: print(f'  {len(flags)} unresolved step-change(s) still flagged')
+for k,v in payload['metrics'].items():
+    print(f'  metric "{k}": {len(v)} reading(s)')

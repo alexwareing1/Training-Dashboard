@@ -36,6 +36,12 @@ venue / sick columns:
     so either put #guest: last or separate it, e.g.
         "#sick #guest:Prime Fitness"  or  "#guest:Prime Fitness, felt rough".
     These columns are only written if the CSV header already has them.
+
+bodyweight:
+    Also pulls GET /v1/body_measurements and appends any weight_kg readings
+    not already recorded to metric-bodyweight-kg.csv as plain 'date,value'
+    rows (no header) - the format rebuild-dashboard.py's load_metric_files()
+    reads. Existing dates in that file are left untouched and skipped.
 """
 import csv, io, json, os, re, sys, time
 import urllib.error, urllib.parse, urllib.request
@@ -49,6 +55,7 @@ except ImportError:                      # Python < 3.9
 HERE     = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(HERE, "hevyexportfullhistory.csv")
 KEY_PATH = os.path.join(HERE, ".hevy-api-key")   # untracked; see .hevy-api-key.example
+BW_PATH  = os.path.join(HERE, "metric-bodyweight-kg.csv")
 API_BASE = "https://api.hevyapp.com/v1"
 PAGE_SIZE = 10                           # API maximum
 
@@ -177,6 +184,60 @@ def fetch_all_workouts():
     return workouts
 
 
+def fetch_body_measurements():
+    first = api_get("/body_measurements", {"page": 1, "pageSize": PAGE_SIZE})
+    pages = max(1, int(first.get("page_count", 1)))
+    items = list(first.get("body_measurements", []))
+    for page in range(2, pages + 1):
+        time.sleep(1)
+        data = api_get("/body_measurements", {"page": page, "pageSize": PAGE_SIZE})
+        items.extend(data.get("body_measurements", []))
+    return items
+
+
+def sync_bodyweight(dry_run=False):
+    """Pull /v1/body_measurements and append any weight_kg readings whose
+    date isn't already in metric-bodyweight-kg.csv, as plain 'date,value'
+    rows (no header) - the format rebuild-dashboard.py's load_metric_files()
+    reads. One reading per date; existing dates are left untouched."""
+    have = set()
+    if os.path.exists(BW_PATH):
+        with open(BW_PATH, newline="", encoding="utf-8") as f:
+            for row in csv.reader(f):
+                if row:
+                    have.add(row[0].strip())
+
+    print("\nFetching body measurements from Hevy...", file=sys.stderr)
+    items = fetch_body_measurements()
+
+    fresh = []
+    for it in items:
+        d, w = (it.get("date") or "").strip(), it.get("weight_kg")
+        if not d or w is None or d in have:
+            continue
+        fresh.append((d, w))
+        have.add(d)                      # guard duplicate dates within this pull too
+
+    if not fresh:
+        print("Bodyweight: up to date, nothing to add.")
+        return
+
+    fresh.sort()
+    print(f"Bodyweight: {len(fresh)} new reading(s):")
+    for d, w in fresh:
+        print(f"  + {d}  {num(w)} kg")
+
+    if dry_run:
+        print("--dry-run: metric-bodyweight-kg.csv not written.")
+        return
+
+    with open(BW_PATH, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f, lineterminator="\n")
+        for d, w in fresh:
+            writer.writerow([d, num(w)])
+    print(f"Appended {len(fresh)} row(s) to {os.path.basename(BW_PATH)}.")
+
+
 def workout_tags(w):
     """Scan the workout description and every exercise note for #sick / #guest:
     markers. Returns (venue, sick_flag) as CSV-ready strings ('' when absent)."""
@@ -279,6 +340,7 @@ def main():
 
     if not fresh:
         print(f"Up to date - {dup} workouts already in the CSV, nothing to add.")
+        sync_bodyweight(dry_run)
         return
 
     # newest first, to match how the rest of the file is ordered
@@ -292,6 +354,7 @@ def main():
 
     if dry_run:
         print("\n--dry-run: no changes written.")
+        sync_bodyweight(dry_run)
         return
 
     # --- splice the new rows in right after the header, CRLF like the file --
@@ -312,6 +375,8 @@ def main():
         f.writelines(out)
     os.replace(tmp, CSV_PATH)
     print(f"\nAppended {len(new_rows)} rows to {os.path.basename(CSV_PATH)}.")
+
+    sync_bodyweight(dry_run)
 
 
 if __name__ == "__main__":
