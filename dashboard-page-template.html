@@ -138,6 +138,12 @@ tbody tr:hover{background:var(--panel2)}
   cursor:pointer;color:var(--dim)}
 .tab[aria-pressed="true"]{background:var(--ink);color:var(--ground);border-color:var(--ink)}
 .tab:focus-visible,select:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.exoverlay-picker{display:flex;flex-wrap:wrap;gap:2px 18px}
+.exoverlay-group{flex-basis:100%;font-family:var(--mono);font-size:10px;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--dim);margin:12px 0 3px}
+.exoverlay-group:first-child{margin-top:0}
+.exoverlay-item{display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:2px 0}
+.exoverlay-item input{cursor:pointer}
 select{font-family:var(--mono);font-size:12.5px;padding:6px 9px;border:1px solid var(--rule);
   background:var(--panel);border-radius:2px;color:var(--ink);max-width:100%}
 
@@ -246,9 +252,35 @@ footer li{margin-bottom:5px}
   improve fast for reasons that are not strength.</p>
 </section>
 
+<section id="groupsoverlay">
+  <div class="shead">
+    <span class="num">05</span><h2>Muscle groups overlaid</h2>
+    <p>Same baseline-100 index as the cards above, all seven groups on one axis. Toggle a chip to
+    show or hide its line.</p>
+  </div>
+  <div class="card">
+    <div class="tabs" id="grouptoggles"></div>
+    <div id="groupoverlaychart"></div>
+  </div>
+</section>
+
+<section id="exoverlay">
+  <div class="shead">
+    <span class="num">06</span><h2>Exercises overlaid</h2>
+    <p>Any set of lifts, normalised to % change from each one's first logged session, so machines and
+    barbells with different starting loads sit on the same axis.</p>
+  </div>
+  <div class="card">
+    <div class="exoverlay-picker" id="exoverlaypicker"></div>
+    <div id="exoverlaychart" style="margin-top:14px"></div>
+    <p class="note" id="exoverlayempty" style="display:none">Pick one or more exercises above to
+    compare their progress.</p>
+  </div>
+</section>
+
 <section id="raw">
   <div class="shead">
-    <span class="num">05</span><h2>Actual weights on the bar</h2>
+    <span class="num">07</span><h2>Actual weights on the bar</h2>
     <p>No normalising. Best estimated 1RM per session, in kilograms, exactly as logged (after the
     doubling fix).</p>
   </div>
@@ -260,7 +292,7 @@ footer li{margin-bottom:5px}
 
 <section id="volume">
   <div class="shead">
-    <span class="num">06</span><h2>Volume</h2>
+    <span class="num">08</span><h2>Volume</h2>
     <p>Tonnage per month, split by group. Bodyweight movements count at
     <span class="mono" id="bw1"></span> assumed body mass.</p>
   </div>
@@ -275,7 +307,7 @@ footer li{margin-bottom:5px}
 
 <section id="timing">
   <div class="shead">
-    <span class="num">07</span><h2>When you train</h2>
+    <span class="num">09</span><h2>When you train</h2>
     <p>Start time, weekday, session length and the gaps between sessions.</p>
   </div>
   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
@@ -288,7 +320,7 @@ footer li{margin-bottom:5px}
 
 <section id="sets">
   <div class="shead">
-    <span class="num">08</span><h2>Weight and reps per set</h2>
+    <span class="num">10</span><h2>Weight and reps per set</h2>
     <p>The shape of the work itself: how heavy each set was, and how many reps it ran for.</p>
   </div>
   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
@@ -300,7 +332,7 @@ footer li{margin-bottom:5px}
 
 <section id="records">
   <div class="shead">
-    <span class="num">09</span><h2>Records</h2>
+    <span class="num">11</span><h2>Records</h2>
     <p>Best estimated 1RM and the single heaviest working set, per exercise.</p>
   </div>
   <div class="tabs" id="rectabs"></div>
@@ -309,7 +341,7 @@ footer li{margin-bottom:5px}
 
 <section id="drill">
   <div class="shead">
-    <span class="num">10</span><h2>One exercise at a time</h2>
+    <span class="num">12</span><h2>One exercise at a time</h2>
     <p>Session-by-session estimated 1RM for any lift with enough history.</p>
   </div>
   <div class="card">
@@ -321,7 +353,7 @@ footer li{margin-bottom:5px}
 
 <section id="health" style="display:none">
   <div class="shead">
-    <span class="num">11</span><h2>Health metrics</h2>
+    <span class="num">13</span><h2>Health metrics</h2>
     <p>Other numbers worth tracking alongside the lifting itself.</p>
   </div>
   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))" id="healthgrid"></div>
@@ -601,7 +633,104 @@ if(D.sessions.some(x=>x.sick)) document.getElementById('sicknote').style.display
   });
 })();
 
-/* ---------------------------------------------------------------- 05 raw kg */
+/* ---------------------------------------------------------------- 05 groups overlay */
+(function(){
+  const host=document.getElementById('grouptoggles');
+  const avail=GROUPS.filter(g=>D.group_index[g]&&D.group_index[g].length>1);
+  const active=new Set(avail);
+  avail.forEach(g=>{
+    const b=document.createElement('button');
+    b.className='tab'; b.setAttribute('aria-pressed','true');
+    b.innerHTML=`<span class="swatch" style="background:${GC[g]}"></span>${g}`;
+    b.onclick=()=>{
+      if(active.has(g)) active.delete(g); else active.add(g);
+      b.setAttribute('aria-pressed',active.has(g));
+      draw();
+    };
+    host.appendChild(b);
+  });
+  function draw(){
+    const shown=avail.filter(g=>active.has(g));
+    const W=1000,H=280,M={l:38,r:14,t:26,b:34};
+    const s=svg(document.getElementById('groupoverlaychart'),W,H);
+    const vals=shown.length?shown.flatMap(g=>D.group_index[g].map(p=>p.sm)):[95,105];
+    const y0=Math.floor(Math.min(95,...vals)/5)*5, y1=Math.ceil(Math.max(105,...vals)/5)*5;
+    const ticks=[];for(let v=y0;v<=y1;v+=5)ticks.push(v);
+    const f=frame(s,W,H,M,y0,y1,v=>v,ticks);
+    mk(s,'line',{x1:M.l,x2:W-M.r,y1:f.Y(100),y2:f.Y(100),stroke:INK,'stroke-width':1,opacity:.35});
+    txt(s,M.l+4,f.Y(100)-5,'BASELINE 100','axl','start');
+    shown.forEach(g=>{
+      const pts=D.group_index[g];
+      ['Gym A','Gym B'].forEach(gy=>{
+        const p=pts.filter(x=>x.gym===gy).map(x=>[f.X(x.date),f.Y(x.sm)]);
+        path(s,p,GC[g],2.2);
+      });
+      pts.forEach(x=>{
+        const c=mk(s,'circle',{cx:f.X(x.date),cy:f.Y(x.sm),r:2.4,fill:GC[g]});
+        hoverable(c,`${g}\n${my(x.date)}\nindex ${x.sm.toFixed(0)}`);
+      });
+    });
+  }
+  draw();
+})();
+
+/* ---------------------------------------------------------------- 06 exercises overlaid */
+(function(){
+  const picker=document.getElementById('exoverlaypicker');
+  const names=Object.keys(D.ex_history).sort((a,b)=>
+    (D.ex_group[a]+a).localeCompare(D.ex_group[b]+b));
+  const selected=new Set(
+    [...names].sort((a,b)=>D.ex_history[b].length-D.ex_history[a].length).slice(0,3)
+  );
+  let last=null;
+  names.forEach(n=>{
+    const g=D.ex_group[n];
+    if(g!==last){
+      const h=document.createElement('div');
+      h.className='exoverlay-group'; h.textContent=g;
+      picker.appendChild(h);
+      last=g;
+    }
+    const lab=document.createElement('label');
+    lab.className='exoverlay-item';
+    lab.innerHTML=`<input type="checkbox" ${selected.has(n)?'checked':''}>
+      <span class="swatch" style="background:${GC[g]}"></span>${n}`;
+    lab.querySelector('input').onchange=e=>{
+      if(e.target.checked) selected.add(n); else selected.delete(n);
+      draw();
+    };
+    picker.appendChild(lab);
+  });
+
+  function draw(){
+    const chartEl=document.getElementById('exoverlaychart');
+    const empty=document.getElementById('exoverlayempty');
+    if(!selected.size){ chartEl.innerHTML=''; empty.style.display=''; return; }
+    empty.style.display='none';
+    const series=[...selected].map(n=>{
+      const h=D.ex_history[n], v0=h[0].v;
+      return {n, g:D.ex_group[n], pts:h.map(x=>({date:x.date,pct:(x.v/v0-1)*100}))};
+    });
+    const W=1000,H=280,M={l:44,r:14,t:26,b:34};
+    const s=svg(chartEl,W,H);
+    const allPct=series.flatMap(x=>x.pts.map(p=>p.pct));
+    const y0=Math.floor(Math.min(0,...allPct)/10)*10, y1=Math.ceil(Math.max(0,...allPct)/10)*10+2;
+    const ticks=[];for(let v=y0;v<=y1;v+=10)ticks.push(v);
+    const f=frame(s,W,H,M,y0,y1,v=>(v>0?'+':'')+v+'%',ticks);
+    mk(s,'line',{x1:M.l,x2:W-M.r,y1:f.Y(0),y2:f.Y(0),stroke:INK,'stroke-width':1,opacity:.35});
+    txt(s,M.l+4,f.Y(0)-5,'FIRST SESSION','axl','start');
+    series.forEach(({n,g,pts})=>{
+      path(s,pts.map(p=>[f.X(p.date),f.Y(p.pct)]),GC[g],2.2);
+      pts.forEach(p=>{
+        const c=mk(s,'circle',{cx:f.X(p.date),cy:f.Y(p.pct),r:2.6,fill:GC[g]});
+        hoverable(c,`${n}\n${md(p.date)} ${new Date(p.date).getFullYear()}\n${p.pct>=0?'+':''}${p.pct.toFixed(0)}%`);
+      });
+    });
+  }
+  draw();
+})();
+
+/* ---------------------------------------------------------------- 07 raw kg */
 (function(){
   const tabs=document.getElementById('rawtabs');
   const avail=GROUPS.filter(g=>D.best_e1rm[g]&&D.best_e1rm[g].length>2);
@@ -636,7 +765,7 @@ if(D.sessions.some(x=>x.sick)) document.getElementById('sicknote').style.display
   draw();
 })();
 
-/* ---------------------------------------------------------------- 06 volume */
+/* ---------------------------------------------------------------- 08 volume */
 (function(){
   const V=D.vol_month, months=V.months, keys=GROUPS.filter(g=>V.series[g]);
   const W=1000,H=260,M={l:40,r:14,t:16,b:34};
@@ -688,7 +817,7 @@ if(D.sessions.some(x=>x.sick)) document.getElementById('sicknote').style.display
   mini('setspm',MS.sets,'#5A6469','');
 })();
 
-/* ---------------------------------------------------------------- 07 timing */
+/* ---------------------------------------------------------------- 09 timing */
 (function(){
   // hour histogram
   const hrs=new Array(24).fill(0);
@@ -758,7 +887,7 @@ if(D.sessions.some(x=>x.sick)) document.getElementById('sicknote').style.display
   })();
 })();
 
-/* ---------------------------------------------------------------- 08 distributions */
+/* ---------------------------------------------------------------- 10 distributions */
 (function(){
   const E=D.wdist.edges, A=D.wdist['Gym A']||[], B=D.wdist['Gym B']||[];
   const W=460,H=160,M={l:30,r:10,t:12,b:28};
@@ -796,7 +925,7 @@ if(D.sessions.some(x=>x.sick)) document.getElementById('sicknote').style.display
   mk(s2,'line',{x1:M.l,x2:W-M.r,y1:M.t+ih,y2:M.t+ih,stroke:INK,'stroke-width':1});
 })();
 
-/* ---------------------------------------------------------------- 09 records */
+/* ---------------------------------------------------------------- 11 records */
 (function(){
   const tabs=document.getElementById('rectabs'), tbl=document.getElementById('rectable');
   let cur='All';
@@ -828,7 +957,7 @@ if(D.sessions.some(x=>x.sick)) document.getElementById('sicknote').style.display
   draw();
 })();
 
-/* ---------------------------------------------------------------- 10 drilldown */
+/* ---------------------------------------------------------------- 12 drilldown */
 (function(){
   const sel=document.getElementById('exsel');
   const names=Object.keys(D.ex_history).sort((a,b)=>
@@ -873,7 +1002,7 @@ if(D.sessions.some(x=>x.sick)) document.getElementById('sicknote').style.display
   }
 })();
 
-/* ---------------------------------------------------------------- 11 health metrics */
+/* ---------------------------------------------------------------- 13 health metrics */
 (function(){
   const metrics=D.health_metrics||{};
   const names=Object.keys(metrics);
