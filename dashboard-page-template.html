@@ -457,9 +457,13 @@ function hoverable(node,text){
 }
 
 /* time-axis chart frame with era shading + seam */
-function frame(s,W,H,M,y0,y1,fmtY,ticksY){
+function frame(s,W,H,M,y0,y1,fmtY,ticksY,domT0,domT1){
+  // domT0/domT1 let a chart use its own date range instead of the training
+  // sessions' T0-T1 (e.g. a health metric logged for longer than sessions
+  // have been tracked) - default to the shared session range everywhere else
+  const t0=domT0||T0, t1=domT1||T1;
   const iw=W-M.l-M.r, ih=H-M.t-M.b;
-  const X=d=>M.l+(new Date(d)-T0)/(T1-T0)*iw;
+  const X=d=>M.l+(new Date(d)-t0)/(t1-t0)*iw;
   const Y=v=>M.t+ih-(v-y0)/(y1-y0)*ih;
   // era wash
   mk(s,'rect',{x:M.l,y:M.t,width:X(SWITCH)-M.l,height:ih,fill:'#000',opacity:.022});
@@ -470,10 +474,10 @@ function frame(s,W,H,M,y0,y1,fmtY,ticksY){
   });
   // month ticks - label every Nth month, N scaled to the actual date range so
   // labels stay readable whether the log spans a few months or several years
-  const totalMonths=(T1.getFullYear()-T0.getFullYear())*12+(T1.getMonth()-T0.getMonth());
+  const totalMonths=(t1.getFullYear()-t0.getFullYear())*12+(t1.getMonth()-t0.getMonth());
   const labelEvery=Math.max(1,Math.round(totalMonths/6));
-  let d=new Date(T0.getFullYear(),T0.getMonth()+1,1), mi=0;
-  while(d<T1){ const x=X(d);
+  let d=new Date(t0.getFullYear(),t0.getMonth()+1,1), mi=0;
+  while(d<t1){ const x=X(d);
     mk(s,'line',{x1:x,x2:x,y1:M.t+ih,y2:M.t+ih+4,class:'gl'});
     if(mi%labelEvery===0) txt(s,x,M.t+ih+15,my(d));
     d=new Date(d.getFullYear(),d.getMonth()+1,1); mi++;
@@ -1096,10 +1100,19 @@ function drawBWOverlay(s,f,M,W,series){
     const vs=pts.map(x=>x.v);
     const lo=Math.floor(Math.min(...vs)-1), hi=Math.ceil(Math.max(...vs)+1);
     const ticks=[];for(let v=lo;v<=hi;v+=(hi-lo)/4)ticks.push(Math.round(v*10)/10);
-    const f=frame(s,W,H,M,lo,hi,v=>v,ticks);
-    // a metric can have been logged for longer than the training sessions
-    // that set T0-T1, so clip to this chart's own frame rather than let an
-    // out-of-range real reading bleed past the axis
+    // this metric's own date range, not the training sessions' T0-T1 - a
+    // metric can be logged for longer than sessions have been tracked, and
+    // borrowing the session range would silently drop readings outside it
+    // even though they still count in the stats line below
+    let mT0,mT1;
+    if(pts.length>=2){
+      const mDates=pts.map(x=>+new Date(x.date));
+      mT0=new Date(Math.min(...mDates)); mT1=new Date(Math.max(...mDates));
+    } // a single reading has no range of its own - frame() falls back to T0-T1
+    const f=frame(s,W,H,M,lo,hi,v=>v,ticks,mT0,mT1);
+    // belt-and-suspenders: the domain above already spans every point, so
+    // this should be a no-op, but keeps any edge case from bleeding past the
+    // frame rather than silently vanishing
     const clipId='health-clip-'+(CLIP_N++);
     const defs=mk(s,'defs',{});
     mk(mk(defs,'clipPath',{id:clipId}),'rect',{x:M.l,y:M.t,width:f.iw,height:f.ih});
