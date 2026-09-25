@@ -417,6 +417,7 @@ const D = __DATA__;
 const CSSV = getComputedStyle(document.documentElement);
 const INK = CSSV.getPropertyValue('--ink').trim();
 const GROUND = CSSV.getPropertyValue('--ground').trim();
+const DIM = CSSV.getPropertyValue('--dim').trim();
 const GROUP_NAMES = ['Chest','Back','Shoulders','Legs','Biceps','Triceps','Core'];
 const GC = Object.fromEntries(GROUP_NAMES.map(g=>[g, CSSV.getPropertyValue('--'+g).trim()]));
 const GROUPS = ['Chest','Back','Shoulders','Biceps','Triceps','Legs','Core'];
@@ -495,6 +496,36 @@ document.getElementById('bw1').textContent = D.meta.bw + ' kg';
 document.getElementById('bw2').textContent = D.meta.bw + ' kg';
 if(D.sessions.some(x=>x.venue)) document.getElementById('awaynote').style.display='';
 if(D.sessions.some(x=>x.sick)) document.getElementById('sicknote').style.display='';
+
+/* ---------------------------------------------------------------- bodyweight overlay
+   Shared across every strength chart below. BW_POINTS is the raw kg series from
+   metric-bodyweight-kg.csv; BW_INDEXED is the same series rebased to 100 at its own
+   first reading, for overlaying on index-scale (not kg-scale) charts. Both carry the
+   last logged reading forward via valueAtOrBefore, since bodyweight isn't logged
+   every session. The overlay is skipped entirely with fewer than two readings. */
+const BW_POINTS = ((D.health_metrics||{}).bodyweight||{}).points || [];
+const HAS_BW = BW_POINTS.length >= 2;
+const BW_INDEXED = HAS_BW ? BW_POINTS.map(p=>({date:p.date, v:p.v/BW_POINTS[0].v*100})) : [];
+function valueAtOrBefore(series,date){
+  const t=+new Date(date);
+  let v=null;
+  for(const p of series){ if(+new Date(p.date)>t) break; v=p.v; }
+  return v;
+}
+function bwAt(date){ return HAS_BW ? valueAtOrBefore(BW_POINTS,date) : null; }
+function bwIndexAt(date){ return HAS_BW ? valueAtOrBefore(BW_INDEXED,date) : null; }
+// step-shaped point path (flat between readings, vertical jump at each new one),
+// held out to the right edge of the chart at the last known value
+function bwStepPoints(series,X,Y){
+  if(series.length<2) return [];
+  const pts=[[X(series[0].date),Y(series[0].v)]];
+  for(let i=1;i<series.length;i++){
+    pts.push([X(series[i].date),Y(series[i-1].v)]);
+    pts.push([X(series[i].date),Y(series[i].v)]);
+  }
+  pts.push([X(T1),Y(series[series.length-1].v)]);
+  return pts;
+}
 
 /* ---------------------------------------------------------------- 00 figures */
 (function(){
@@ -582,18 +613,24 @@ if(D.sessions.some(x=>x.sick)) document.getElementById('sicknote').style.display
 (function(){
   const W=1000,H=260,M={l:38,r:14,t:26,b:34};
   const s=svg(document.getElementById('overallchart'),W,H);
-  const vs=D.overall.map(o=>o.value);
+  const vs=D.overall.map(o=>o.value).concat(HAS_BW?BW_INDEXED.map(p=>p.v):[]);
   const y0=Math.floor(Math.min(95,...vs)/5)*5, y1=Math.ceil(Math.max(...vs)/5)*5+2;
   const ticks=[];for(let v=y0;v<=y1;v+=5)ticks.push(v);
   const f=frame(s,W,H,M,y0,y1,v=>v,ticks);
   mk(s,'line',{x1:M.l,x2:W-M.r,y1:f.Y(100),y2:f.Y(100),stroke:INK,'stroke-width':1,opacity:.35});
   txt(s,M.l+4,f.Y(100)-5,'BASELINE 100','axl','start');
+  if(HAS_BW){
+    const bwPts=bwStepPoints(BW_INDEXED,f.X,f.Y);
+    path(s,bwPts,DIM,1.6,'5 4');
+    txt(s,bwPts[0][0],bwPts[0][1]-7,'BODYWEIGHT','axl','start');
+  }
   const pts=D.overall.map(o=>[f.X(o.date),f.Y(o.value)]);
   path(s,pts,INK,2.4);
   D.overall.forEach((o,i)=>{
     const c=mk(s,'circle',{cx:pts[i][0],cy:pts[i][1],r:3.6,fill:'#E6E9E4',
       stroke:INK,'stroke-width':2});
-    hoverable(c,`${my(o.date)}\nindex ${o.value}\n${o.n} muscle groups in range`);
+    const bwIdx=bwIndexAt(o.date);
+    hoverable(c,`${my(o.date)}\nindex ${o.value}\n${o.n} muscle groups in range${bwIdx?`\n${(o.value/bwIdx).toFixed(2)}× bodyweight index`:''}`);
   });
   document.getElementById('ov0').textContent=D.overall[0].value;
   document.getElementById('ov1').textContent=D.overall[D.overall.length-1].value;
@@ -657,12 +694,18 @@ if(D.sessions.some(x=>x.sick)) document.getElementById('sicknote').style.display
     const shown=avail.filter(g=>active.has(g));
     const W=1000,H=280,M={l:38,r:14,t:26,b:34};
     const s=svg(document.getElementById('groupoverlaychart'),W,H);
-    const vals=shown.length?shown.flatMap(g=>D.group_index[g].map(p=>p.sm)):[95,105];
+    const vals=(shown.length?shown.flatMap(g=>D.group_index[g].map(p=>p.sm)):[95,105])
+      .concat(HAS_BW?BW_INDEXED.map(p=>p.v):[]);
     const y0=Math.floor(Math.min(95,...vals)/5)*5, y1=Math.ceil(Math.max(105,...vals)/5)*5;
     const ticks=[];for(let v=y0;v<=y1;v+=5)ticks.push(v);
     const f=frame(s,W,H,M,y0,y1,v=>v,ticks);
     mk(s,'line',{x1:M.l,x2:W-M.r,y1:f.Y(100),y2:f.Y(100),stroke:INK,'stroke-width':1,opacity:.35});
     txt(s,M.l+4,f.Y(100)-5,'BASELINE 100','axl','start');
+    if(HAS_BW){
+      const bwPts=bwStepPoints(BW_INDEXED,f.X,f.Y);
+      path(s,bwPts,DIM,1.6,'5 4');
+      txt(s,bwPts[0][0],bwPts[0][1]-7,'BODYWEIGHT','axl','start');
+    }
     shown.forEach(g=>{
       const pts=D.group_index[g];
       ['Gym A','Gym B'].forEach(gy=>{
@@ -671,7 +714,8 @@ if(D.sessions.some(x=>x.sick)) document.getElementById('sicknote').style.display
       });
       pts.forEach(x=>{
         const c=mk(s,'circle',{cx:f.X(x.date),cy:f.Y(x.sm),r:2.4,fill:GC[g]});
-        hoverable(c,`${g}\n${my(x.date)}\nindex ${x.sm.toFixed(0)}`);
+        const bwIdx=bwIndexAt(x.date);
+        hoverable(c,`${g}\n${my(x.date)}\nindex ${x.sm.toFixed(0)}${bwIdx?`\n${(x.sm/bwIdx).toFixed(2)}× bodyweight index`:''}`);
       });
     });
   }
@@ -717,17 +761,24 @@ if(D.sessions.some(x=>x.sick)) document.getElementById('sicknote').style.display
     });
     const W=1000,H=280,M={l:44,r:14,t:26,b:34};
     const s=svg(chartEl,W,H);
-    const allPct=series.flatMap(x=>x.pts.map(p=>p.pct));
+    const bwPct=HAS_BW ? BW_INDEXED.map(p=>({date:p.date, v:p.v-100})) : [];
+    const allPct=series.flatMap(x=>x.pts.map(p=>p.pct)).concat(bwPct.map(p=>p.v));
     const y0=Math.floor(Math.min(0,...allPct)/10)*10, y1=Math.ceil(Math.max(0,...allPct)/10)*10+2;
     const ticks=[];for(let v=y0;v<=y1;v+=10)ticks.push(v);
     const f=frame(s,W,H,M,y0,y1,v=>(v>0?'+':'')+v+'%',ticks);
     mk(s,'line',{x1:M.l,x2:W-M.r,y1:f.Y(0),y2:f.Y(0),stroke:INK,'stroke-width':1,opacity:.35});
     txt(s,M.l+4,f.Y(0)-5,'FIRST SESSION','axl','start');
+    if(HAS_BW){
+      const bwPts=bwStepPoints(bwPct,f.X,f.Y);
+      path(s,bwPts,DIM,1.6,'5 4');
+      txt(s,bwPts[0][0],bwPts[0][1]-7,'BODYWEIGHT','axl','start');
+    }
     series.forEach(({n,g,pts})=>{
       path(s,pts.map(p=>[f.X(p.date),f.Y(p.pct)]),GC[g],2.2);
       pts.forEach(p=>{
         const c=mk(s,'circle',{cx:f.X(p.date),cy:f.Y(p.pct),r:2.6,fill:GC[g]});
-        hoverable(c,`${n}\n${md(p.date)} ${new Date(p.date).getFullYear()}\n${p.pct>=0?'+':''}${p.pct.toFixed(0)}%`);
+        const bwIdx=bwIndexAt(p.date);
+        hoverable(c,`${n}\n${md(p.date)} ${new Date(p.date).getFullYear()}\n${p.pct>=0?'+':''}${p.pct.toFixed(0)}%${bwIdx?`\n${((100+p.pct)/bwIdx).toFixed(2)}× bodyweight index`:''}`);
       });
     });
   }
@@ -749,10 +800,16 @@ if(D.sessions.some(x=>x.sick)) document.getElementById('sicknote').style.display
     const data=D.best_e1rm[cur];
     const W=1000,H=250,M={l:44,r:14,t:26,b:34};
     const s=svg(document.getElementById('rawchart'),W,H);
-    const vs=data.map(d=>d.v), hi=Math.ceil(Math.max(...vs)/20)*20;
+    const vs=data.map(d=>d.v).concat(HAS_BW?BW_POINTS.map(p=>p.v):[]);
+    const hi=Math.ceil(Math.max(...vs)/20)*20;
     const ticks=[];for(let v=0;v<=hi;v+=hi/5)ticks.push(v);
     const f=frame(s,W,H,M,0,hi,v=>Math.round(v),ticks);
     txt(s,M.l-34,M.t-10,'kg','axl','start');
+    if(HAS_BW){
+      const bwPts=bwStepPoints(BW_POINTS,f.X,f.Y);
+      path(s,bwPts,DIM,1.6,'5 4');
+      txt(s,bwPts[0][0],bwPts[0][1]-7,'BODYWEIGHT','axl','start');
+    }
     const A=data.filter(d=>new Date(d.date)<SWITCH), B=data.filter(d=>new Date(d.date)>=SWITCH);
     [A,B].forEach(arr=>path(s,arr.map(d=>[f.X(d.date),f.Y(d.v)]),GC[cur],2.2));
     data.forEach(d=>{
@@ -763,7 +820,8 @@ if(D.sessions.some(x=>x.sick)) document.getElementById('sicknote').style.display
       if(capped) mk(s,'circle',{cx:f.X(d.date),cy:f.Y(d.v),r:(away?4.4:3)+3,
         fill:'none',stroke:'#B37800','stroke-width':1.4,'stroke-dasharray':'2 2'});
       if(sick) mk(s,'circle',{cx:f.X(d.date)+6,cy:f.Y(d.v)-6,r:2.8,fill:'#D6006D',stroke:GROUND,'stroke-width':1.2});
-      hoverable(c,`${md(d.date)} ${new Date(d.date).getFullYear()}\nbest e1RM ${d.v} kg${away?`\naway session · ${d.venue}`:''}${sick?`\nfeeling under the weather`:''}${capped?`\nreps capped at 15 for this estimate`:''}`);
+      const atBW=bwAt(d.date);
+      hoverable(c,`${md(d.date)} ${new Date(d.date).getFullYear()}\nbest e1RM ${d.v} kg${away?`\naway session · ${d.venue}`:''}${sick?`\nfeeling under the weather`:''}${capped?`\nreps capped at 15 for this estimate`:''}${atBW?`\n${(d.v/atBW).toFixed(2)}× bodyweight`:''}`);
     });
   }
   draw();
@@ -979,9 +1037,15 @@ if(D.sessions.some(x=>x.sick)) document.getElementById('sicknote').style.display
     const ex=sel.value, h=D.ex_history[ex], g=D.ex_group[ex];
     const W=1000,H=230,M={l:44,r:14,t:26,b:34};
     const s=svg(document.getElementById('exchart'),W,H);
-    const vs=h.map(x=>x.v), hi=Math.ceil(Math.max(...vs)/10)*10+5, lo=0;
+    const vs=h.map(x=>x.v).concat(HAS_BW?BW_POINTS.map(p=>p.v):[]);
+    const hi=Math.ceil(Math.max(...vs)/10)*10+5, lo=0;
     const ticks=[];for(let v=0;v<=hi;v+=hi/4)ticks.push(v);
     const f=frame(s,W,H,M,lo,hi,v=>Math.round(v),ticks);
+    if(HAS_BW){
+      const bwPts=bwStepPoints(BW_POINTS,f.X,f.Y);
+      path(s,bwPts,DIM,1.6,'5 4');
+      txt(s,bwPts[0][0],bwPts[0][1]-7,'BODYWEIGHT','axl','start');
+    }
     ['Gym A','Gym B'].forEach(gy=>{
       const p=h.filter(x=>x.gym===gy);
       path(s,p.map(x=>[f.X(x.date),f.Y(x.v)]),GC[g],2.2);
@@ -994,7 +1058,8 @@ if(D.sessions.some(x=>x.sick)) document.getElementById('sicknote').style.display
       if(capped) mk(s,'circle',{cx:f.X(x.date),cy:f.Y(x.v),r:(away?4.4:3.2)+3,
         fill:'none',stroke:'#B37800','stroke-width':1.4,'stroke-dasharray':'2 2'});
       if(sick) mk(s,'circle',{cx:f.X(x.date)+6,cy:f.Y(x.v)-6,r:2.8,fill:'#D6006D',stroke:GROUND,'stroke-width':1.2});
-      hoverable(c,`${md(x.date)} ${new Date(x.date).getFullYear()}\ne1RM ${x.v} kg${away?`\naway session · ${x.venue}`:''}${sick?`\nfeeling under the weather`:''}${capped?`\nreps capped at 15 for this estimate`:''}`);
+      const atBW=bwAt(x.date);
+      hoverable(c,`${md(x.date)} ${new Date(x.date).getFullYear()}\ne1RM ${x.v} kg${away?`\naway session · ${x.venue}`:''}${sick?`\nfeeling under the weather`:''}${capped?`\nreps capped at 15 for this estimate`:''}${atBW?`\n${(x.v/atBW).toFixed(2)}× bodyweight`:''}`);
     });
     txt(s,M.l-34,M.t-10,'kg','axl','start');
     const r=D.records.find(x=>x.ex===ex);
