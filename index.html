@@ -205,7 +205,7 @@ footer li{margin-bottom:5px}
 <section id="seam">
   <div class="shead">
     <span class="num">01</span><h2>The seam</h2>
-    <p>Every session in the year, bar height = tonnage lifted, colour = the muscle group that took
+    <p>Every session, bar height = tonnage lifted, colour = the muscle group that took
     the most volume that day.</p>
   </div>
   <div class="card"><div id="yearstrip"></div></div>
@@ -238,7 +238,7 @@ footer li{margin-bottom:5px}
     Machine-agnostic, so it survives the gym change.</p>
   </div>
   <div class="card"><div id="overallchart"></div></div>
-  <p class="note">Across the year the index moves from <b id="ov0"></b> to <b id="ov1"></b>. The dip in
+  <p class="note">Across the log the index moves from <b id="ov0"></b> to <b id="ov1"></b>. The dip in
   June reflects a five-week gap in training, not a loss of strength on any single lift.</p>
 </section>
 
@@ -314,7 +314,7 @@ footer li{margin-bottom:5px}
   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
     <div class="card"><div class="seambar"><span>Start time</span></div><div id="hourchart"></div></div>
     <div class="card"><div class="seambar"><span>Day of week</span></div><div id="dowchart"></div></div>
-    <div class="card"><div class="seambar"><span>Session length over the year</span></div><div id="durchart"></div></div>
+    <div class="card"><div class="seambar"><span>Session length over time</span></div><div id="durchart"></div></div>
     <div class="card"><div class="seambar"><span>Days between sessions</span></div><div id="gapchart"></div></div>
   </div>
 </section>
@@ -468,12 +468,15 @@ function frame(s,W,H,M,y0,y1,fmtY,ticksY){
     mk(s,'line',{x1:M.l,x2:W-M.r,y1:Y(v),y2:Y(v),class:'gl'});
     txt(s,M.l-7,Y(v)+3.4,fmtY?fmtY(v):v,'ax','end');
   });
-  // month ticks
-  let d=new Date(T0.getFullYear(),T0.getMonth()+1,1);
+  // month ticks - label every Nth month, N scaled to the actual date range so
+  // labels stay readable whether the log spans a few months or several years
+  const totalMonths=(T1.getFullYear()-T0.getFullYear())*12+(T1.getMonth()-T0.getMonth());
+  const labelEvery=Math.max(1,Math.round(totalMonths/6));
+  let d=new Date(T0.getFullYear(),T0.getMonth()+1,1), mi=0;
   while(d<T1){ const x=X(d);
     mk(s,'line',{x1:x,x2:x,y1:M.t+ih,y2:M.t+ih+4,class:'gl'});
-    if(d.getMonth()%2===0) txt(s,x,M.t+ih+15,my(d));
-    d=new Date(d.getFullYear(),d.getMonth()+1,1);
+    if(mi%labelEvery===0) txt(s,x,M.t+ih+15,my(d));
+    d=new Date(d.getFullYear(),d.getMonth()+1,1); mi++;
   }
   mk(s,'line',{x1:M.l,x2:W-M.r,y1:M.t+ih,y2:M.t+ih,stroke:INK,'stroke-width':1});
   // seam
@@ -485,7 +488,7 @@ function frame(s,W,H,M,y0,y1,fmtY,ticksY){
 function path(s,pts,color,w,dash){
   if(pts.length<2) return;
   const d=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
-  mk(s,'path',{d,fill:'none',stroke:color,'stroke-width':w||2,
+  return mk(s,'path',{d,fill:'none',stroke:color,'stroke-width':w||2,
     'stroke-linejoin':'round','stroke-linecap':'round',
     ...(dash?{'stroke-dasharray':dash}:{})});
 }
@@ -525,6 +528,26 @@ function bwStepPoints(series,X,Y){
   }
   pts.push([X(T1),Y(series[series.length-1].v)]);
   return pts;
+}
+// where the bodyweight line first becomes visible within a chart's own T0-T1
+// window: at T0 itself if a real reading already covers that date (carried
+// forward), otherwise at the first real reading (which then falls after T0)
+function bwLabelPoint(series,f){
+  const atT0=valueAtOrBefore(series,T0);
+  return atT0!=null ? [f.X(T0),f.Y(atT0)] : [f.X(series[0].date),f.Y(series[0].v)];
+}
+let BW_CLIP_N=0;
+// draws the dashed bodyweight overlay, clipped to the chart's own frame so a
+// real reading from before this chart's date range never bleeds past the axis
+function drawBWOverlay(s,f,M,W,series){
+  if(series.length<2) return;
+  const id='bw-clip-'+(BW_CLIP_N++);
+  const defs=mk(s,'defs',{});
+  mk(mk(defs,'clipPath',{id}),'rect',{x:M.l,y:M.t,width:f.iw,height:f.ih});
+  const p=path(s,bwStepPoints(series,f.X,f.Y),DIM,1.6,'5 4');
+  if(p) p.setAttribute('clip-path',`url(#${id})`);
+  const [lx,ly]=bwLabelPoint(series,f);
+  txt(s,lx,ly-7,'BODYWEIGHT','axl','start');
 }
 
 /* ---------------------------------------------------------------- 00 figures */
@@ -619,11 +642,7 @@ function bwStepPoints(series,X,Y){
   const f=frame(s,W,H,M,y0,y1,v=>v,ticks);
   mk(s,'line',{x1:M.l,x2:W-M.r,y1:f.Y(100),y2:f.Y(100),stroke:INK,'stroke-width':1,opacity:.35});
   txt(s,M.l+4,f.Y(100)-5,'BASELINE 100','axl','start');
-  if(HAS_BW){
-    const bwPts=bwStepPoints(BW_INDEXED,f.X,f.Y);
-    path(s,bwPts,DIM,1.6,'5 4');
-    txt(s,bwPts[0][0],bwPts[0][1]-7,'BODYWEIGHT','axl','start');
-  }
+  if(HAS_BW) drawBWOverlay(s,f,M,W,BW_INDEXED);
   const pts=D.overall.map(o=>[f.X(o.date),f.Y(o.value)]);
   path(s,pts,INK,2.4);
   D.overall.forEach((o,i)=>{
@@ -701,11 +720,7 @@ function bwStepPoints(series,X,Y){
     const f=frame(s,W,H,M,y0,y1,v=>v,ticks);
     mk(s,'line',{x1:M.l,x2:W-M.r,y1:f.Y(100),y2:f.Y(100),stroke:INK,'stroke-width':1,opacity:.35});
     txt(s,M.l+4,f.Y(100)-5,'BASELINE 100','axl','start');
-    if(HAS_BW){
-      const bwPts=bwStepPoints(BW_INDEXED,f.X,f.Y);
-      path(s,bwPts,DIM,1.6,'5 4');
-      txt(s,bwPts[0][0],bwPts[0][1]-7,'BODYWEIGHT','axl','start');
-    }
+    if(HAS_BW) drawBWOverlay(s,f,M,W,BW_INDEXED);
     shown.forEach(g=>{
       const pts=D.group_index[g];
       ['Gym A','Gym B'].forEach(gy=>{
@@ -768,11 +783,7 @@ function bwStepPoints(series,X,Y){
     const f=frame(s,W,H,M,y0,y1,v=>(v>0?'+':'')+v+'%',ticks);
     mk(s,'line',{x1:M.l,x2:W-M.r,y1:f.Y(0),y2:f.Y(0),stroke:INK,'stroke-width':1,opacity:.35});
     txt(s,M.l+4,f.Y(0)-5,'FIRST SESSION','axl','start');
-    if(HAS_BW){
-      const bwPts=bwStepPoints(bwPct,f.X,f.Y);
-      path(s,bwPts,DIM,1.6,'5 4');
-      txt(s,bwPts[0][0],bwPts[0][1]-7,'BODYWEIGHT','axl','start');
-    }
+    if(HAS_BW) drawBWOverlay(s,f,M,W,bwPct);
     series.forEach(({n,g,pts})=>{
       path(s,pts.map(p=>[f.X(p.date),f.Y(p.pct)]),GC[g],2.2);
       pts.forEach(p=>{
@@ -805,11 +816,7 @@ function bwStepPoints(series,X,Y){
     const ticks=[];for(let v=0;v<=hi;v+=hi/5)ticks.push(v);
     const f=frame(s,W,H,M,0,hi,v=>Math.round(v),ticks);
     txt(s,M.l-34,M.t-10,'kg','axl','start');
-    if(HAS_BW){
-      const bwPts=bwStepPoints(BW_POINTS,f.X,f.Y);
-      path(s,bwPts,DIM,1.6,'5 4');
-      txt(s,bwPts[0][0],bwPts[0][1]-7,'BODYWEIGHT','axl','start');
-    }
+    if(HAS_BW) drawBWOverlay(s,f,M,W,BW_POINTS);
     const A=data.filter(d=>new Date(d.date)<SWITCH), B=data.filter(d=>new Date(d.date)>=SWITCH);
     [A,B].forEach(arr=>path(s,arr.map(d=>[f.X(d.date),f.Y(d.v)]),GC[cur],2.2));
     data.forEach(d=>{
@@ -1041,11 +1048,7 @@ function bwStepPoints(series,X,Y){
     const hi=Math.ceil(Math.max(...vs)/10)*10+5, lo=0;
     const ticks=[];for(let v=0;v<=hi;v+=hi/4)ticks.push(v);
     const f=frame(s,W,H,M,lo,hi,v=>Math.round(v),ticks);
-    if(HAS_BW){
-      const bwPts=bwStepPoints(BW_POINTS,f.X,f.Y);
-      path(s,bwPts,DIM,1.6,'5 4');
-      txt(s,bwPts[0][0],bwPts[0][1]-7,'BODYWEIGHT','axl','start');
-    }
+    if(HAS_BW) drawBWOverlay(s,f,M,W,BW_POINTS);
     ['Gym A','Gym B'].forEach(gy=>{
       const p=h.filter(x=>x.gym===gy);
       path(s,p.map(x=>[f.X(x.date),f.Y(x.v)]),GC[g],2.2);
