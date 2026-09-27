@@ -521,39 +521,20 @@ function valueAtOrBefore(series,date){
 }
 function bwAt(date){ return HAS_BW ? valueAtOrBefore(BW_POINTS,date) : null; }
 function bwIndexAt(date){ return HAS_BW ? valueAtOrBefore(BW_INDEXED,date) : null; }
-// step-shaped point path (flat between readings, vertical jump at each new one),
-// held out to the right edge of the chart at the last known value
-function bwStepPoints(series,X,Y){
-  if(series.length<2) return [];
-  const pts=[[X(series[0].date),Y(series[0].v)]];
+// bodyweight value at a date, interpolated between the readings either side
+// (null outside the logged range) - matches the straight segments drawn below
+function bwInterpAt(series,date){
+  const t=+new Date(date);
   for(let i=1;i<series.length;i++){
-    pts.push([X(series[i].date),Y(series[i-1].v)]);
-    pts.push([X(series[i].date),Y(series[i].v)]);
+    const t0=+new Date(series[i-1].date), t1=+new Date(series[i].date);
+    if(t>=t0 && t<=t1) return series[i-1].v+(series[i].v-series[i-1].v)*((t-t0)/((t1-t0)||1));
   }
-  pts.push([X(T1),Y(series[series.length-1].v)]);
-  return pts;
+  return null;
 }
-// where the bodyweight line first becomes visible within a chart's own T0-T1
-// window: at T0 itself if a real reading already covers that date (carried
-// forward), otherwise at the first real reading (which then falls after T0)
-function bwLabelPoint(series,f){
-  const atT0=valueAtOrBefore(series,T0);
-  return atT0!=null ? [f.X(T0),f.Y(atT0)] : [f.X(series[0].date),f.Y(series[0].v)];
-}
-// readings only a few pixels apart (e.g. daily weigh-ins) would draw as a
-// dashed zigzag too short to read, so each run of close readings is merged
-// into one step at the run's first date, valued at the run's mean
-function bwMergeClose(series,X,minPx){
-  const out=[];let run=[];
-  const flush=()=>{ if(run.length) out.push({date:run[0].date,
-    v:run.reduce((a,p)=>a+p.v,0)/run.length}); run=[]; };
-  for(const p of series){
-    if(run.length && X(p.date)-X(run[run.length-1].date)>=minPx) flush();
-    run.push(p);
-  }
-  flush();
-  return out;
-}
+// bodyweight series colour on every chart (theme-aware red, via --Chest) and
+// the fixed kg range its right-hand reference scale always covers
+const BW_RED = GC.Chest;
+const BW_KG = [68,85];
 let CLIP_N=0;
 // clip rect matching a chart's plot area; returns the url() for clip-path
 function frameClip(s,f,M){
@@ -561,15 +542,45 @@ function frameClip(s,f,M){
   mk(mk(mk(s,'defs',{}),'clipPath',{id}),'rect',{x:M.l,y:M.t,width:f.iw,height:f.ih});
   return `url(#${id})`;
 }
-// draws the dashed bodyweight overlay, clipped to the chart's own frame so a
-// real reading from before this chart's date range never bleeds past the axis
-function drawBWOverlay(s,f,M,W,series){
+// draws the dashed bodyweight overlay point-to-point through each real reading,
+// with a dot per reading, clipped to the chart's own frame so readings from
+// before this chart's date range never bleed past the axis. series is always
+// a 1:1 map of BW_POINTS, so the dot tooltips can quote the raw kg.
+function drawBWOverlay(s,f,M,W,series,color=BW_RED,width=2.2){
   if(series.length<2) return;
   const clip=frameClip(s,f,M);
-  const p=path(s,bwStepPoints(bwMergeClose(series,f.X,12),f.X,f.Y),DIM,1.6,'5 4');
+  const pts=series.map(p=>[f.X(p.date),f.Y(p.v)]);
+  const p=path(s,pts,color,width,'6 4');
   if(p) p.setAttribute('clip-path',clip);
-  const [lx,ly]=bwLabelPoint(series,f);
-  txt(s,lx,ly-7,'BODYWEIGHT','axl','start');
+  series.forEach((pt,i)=>{
+    const c=mk(s,'circle',{cx:pts[i][0],cy:pts[i][1],r:width>2.3?3.6:3,fill:GROUND,
+      stroke:color,'stroke-width':2,'clip-path':clip});
+    hoverable(c,`${md(pt.date)} ${new Date(pt.date).getFullYear()}\nbodyweight ${BW_POINTS[i].v} kg`);
+  });
+  const atT0=bwInterpAt(series,T0);
+  const [lx,ly]=atT0!=null ? [f.X(T0),f.Y(atT0)] : pts[0];
+  const l=txt(s,lx+4,ly-9,'BODYWEIGHT','axl','start');
+  l.style.fill=color;
+}
+// red kg reference scale down the chart's right edge (needs M.r >= 34) for
+// the bodyweight line, spanning BW_KG. toV maps kg into the chart's own
+// y-units (index, % change or plain kg); callers include toV(BW_KG[0/1]) in
+// their y-domain so the whole range is on screen. Labels are thinned to keep
+// ~11px apart, so a squashed kg-axis chart still shows at least the ends.
+function drawBWScale(s,f,M,W,toV){
+  const ax=W-M.r+6, y=kg=>f.Y(toV(kg)), [lo,hi]=BW_KG;
+  const line=a=>mk(s,'line',{...a,stroke:BW_RED,'stroke-width':1,opacity:.7});
+  line({x1:ax,x2:ax,y1:y(hi),y2:y(lo)});
+  if(Math.abs(y(lo)-y(lo+1))>=3)
+    for(let k=lo;k<=hi;k++) line({x1:ax,x2:ax+2,y1:y(k),y2:y(k)});
+  const placed=[];
+  [lo,hi,70,75,80].forEach(k=>{
+    if(placed.some(q=>Math.abs(y(q)-y(k))<11)) return;
+    placed.push(k);
+    line({x1:ax,x2:ax+4,y1:y(k),y2:y(k)});
+    txt(s,ax+7,y(k)+3.4,k,'ax','start').style.fill=BW_RED;
+  });
+  txt(s,ax,y(hi)-9,'kg','axl','start').style.fill=BW_RED;
 }
 
 /* ---------------------------------------------------------------- 00 figures */
@@ -656,9 +667,10 @@ function drawBWOverlay(s,f,M,W,series){
 
 /* ---------------------------------------------------------------- 03 overall */
 (function(){
-  const W=1000,H=260,M={l:38,r:14,t:26,b:34};
+  const W=1000,H=260,M={l:38,r:34,t:26,b:34};
   const s=svg(document.getElementById('overallchart'),W,H);
-  const vs=D.overall.map(o=>o.value).concat(HAS_BW?BW_INDEXED.map(p=>p.v):[]);
+  const bwIdx=kg=>kg/BW_POINTS[0].v*100;
+  const vs=D.overall.map(o=>o.value).concat(HAS_BW?BW_INDEXED.map(p=>p.v).concat(BW_KG.map(bwIdx)):[]);
   const y0=Math.floor(Math.min(95,...vs)/5)*5, y1=Math.ceil(Math.max(...vs)/5)*5+2;
   const ticks=[];for(let v=y0;v<=y1;v+=5)ticks.push(v);
   const f=frame(s,W,H,M,y0,y1,v=>v,ticks);
@@ -666,7 +678,8 @@ function drawBWOverlay(s,f,M,W,series){
   // right-hand end: the left edge is where both the index and bodyweight lines
   // start near 100, so a label there collides with them
   txt(s,W-M.r-4,f.Y(100)-5,'BASELINE 100','axl','end');
-  if(HAS_BW) drawBWOverlay(s,f,M,W,BW_INDEXED);
+  // bodyweight at the index line's own weight, so it reads as a peer series
+  if(HAS_BW){ drawBWOverlay(s,f,M,W,BW_INDEXED,BW_RED,2.4); drawBWScale(s,f,M,W,bwIdx); }
   // monthly points are dated to the 1st, so the first can fall before T0;
   // clip so it doesn't run out over the y-axis labels
   const clip=frameClip(s,f,M);
@@ -739,16 +752,19 @@ function drawBWOverlay(s,f,M,W,series){
   });
   function draw(){
     const shown=avail.filter(g=>active.has(g));
-    const W=1000,H=280,M={l:38,r:14,t:26,b:34};
+    const W=1000,H=280,M={l:38,r:34,t:26,b:34};
     const s=svg(document.getElementById('groupoverlaychart'),W,H);
+    const bwIdx=kg=>kg/BW_POINTS[0].v*100;
     const vals=(shown.length?shown.flatMap(g=>D.group_index[g].map(p=>p.sm)):[95,105])
-      .concat(HAS_BW?BW_INDEXED.map(p=>p.v):[]);
+      .concat(HAS_BW?BW_INDEXED.map(p=>p.v).concat(BW_KG.map(bwIdx)):[]);
     const y0=Math.floor(Math.min(95,...vals)/5)*5, y1=Math.ceil(Math.max(105,...vals)/5)*5;
     const ticks=[];for(let v=y0;v<=y1;v+=5)ticks.push(v);
     const f=frame(s,W,H,M,y0,y1,v=>v,ticks);
     mk(s,'line',{x1:M.l,x2:W-M.r,y1:f.Y(100),y2:f.Y(100),stroke:INK,'stroke-width':1,opacity:.35});
-    txt(s,M.l+4,f.Y(100)-5,'BASELINE 100','axl','start');
-    if(HAS_BW) drawBWOverlay(s,f,M,W,BW_INDEXED);
+    // under the line at the left: BODYWEIGHT sits above it there, and the
+    // group lines run all the way into the right-hand kg scale
+    txt(s,M.l+4,f.Y(100)+13,'BASELINE 100','axl','start');
+    if(HAS_BW){ drawBWOverlay(s,f,M,W,BW_INDEXED); drawBWScale(s,f,M,W,bwIdx); }
     shown.forEach(g=>{
       const pts=D.group_index[g];
       ['Gym A','Gym B'].forEach(gy=>{
@@ -802,16 +818,19 @@ function drawBWOverlay(s,f,M,W,series){
       const h=D.ex_history[n], v0=h[0].v;
       return {n, g:D.ex_group[n], pts:h.map(x=>({date:x.date,pct:(x.v/v0-1)*100}))};
     });
-    const W=1000,H=280,M={l:44,r:14,t:26,b:34};
+    const W=1000,H=280,M={l:44,r:34,t:26,b:34};
     const s=svg(chartEl,W,H);
     const bwPct=HAS_BW ? BW_INDEXED.map(p=>({date:p.date, v:p.v-100})) : [];
-    const allPct=series.flatMap(x=>x.pts.map(p=>p.pct)).concat(bwPct.map(p=>p.v));
+    const kgPct=kg=>kg/BW_POINTS[0].v*100-100;
+    const allPct=series.flatMap(x=>x.pts.map(p=>p.pct)).concat(bwPct.map(p=>p.v))
+      .concat(HAS_BW?BW_KG.map(kgPct):[]);
     const y0=Math.floor(Math.min(0,...allPct)/10)*10, y1=Math.ceil(Math.max(0,...allPct)/10)*10+2;
     const ticks=[];for(let v=y0;v<=y1;v+=10)ticks.push(v);
     const f=frame(s,W,H,M,y0,y1,v=>(v>0?'+':'')+v+'%',ticks);
     mk(s,'line',{x1:M.l,x2:W-M.r,y1:f.Y(0),y2:f.Y(0),stroke:INK,'stroke-width':1,opacity:.35});
-    txt(s,M.l+4,f.Y(0)-5,'FIRST SESSION','axl','start');
-    if(HAS_BW) drawBWOverlay(s,f,M,W,bwPct);
+    // right-hand end: the BODYWEIGHT label owns the left edge
+    txt(s,W-M.r-4,f.Y(0)-5,'FIRST SESSION','axl','end');
+    if(HAS_BW){ drawBWOverlay(s,f,M,W,bwPct); drawBWScale(s,f,M,W,kgPct); }
     series.forEach(({n,g,pts})=>{
       path(s,pts.map(p=>[f.X(p.date),f.Y(p.pct)]),GC[g],2.2);
       pts.forEach(p=>{
@@ -837,14 +856,14 @@ function drawBWOverlay(s,f,M,W,series){
   });
   function draw(){
     const data=D.best_e1rm[cur];
-    const W=1000,H=250,M={l:44,r:14,t:26,b:34};
+    const W=1000,H=250,M={l:44,r:34,t:26,b:34};
     const s=svg(document.getElementById('rawchart'),W,H);
-    const vs=data.map(d=>d.v).concat(HAS_BW?BW_POINTS.map(p=>p.v):[]);
+    const vs=data.map(d=>d.v).concat(HAS_BW?BW_POINTS.map(p=>p.v).concat(BW_KG):[]);
     const hi=Math.ceil(Math.max(...vs)/20)*20;
     const ticks=[];for(let v=0;v<=hi;v+=hi/5)ticks.push(v);
     const f=frame(s,W,H,M,0,hi,v=>Math.round(v),ticks);
     txt(s,M.l-34,M.t-10,'kg','axl','start');
-    if(HAS_BW) drawBWOverlay(s,f,M,W,BW_POINTS);
+    if(HAS_BW){ drawBWOverlay(s,f,M,W,BW_POINTS); drawBWScale(s,f,M,W,kg=>kg); }
     const A=data.filter(d=>new Date(d.date)<SWITCH), B=data.filter(d=>new Date(d.date)>=SWITCH);
     [A,B].forEach(arr=>path(s,arr.map(d=>[f.X(d.date),f.Y(d.v)]),GC[cur],2.2));
     data.forEach(d=>{
@@ -1070,13 +1089,13 @@ function drawBWOverlay(s,f,M,W,series){
   sel.onchange=draw; draw();
   function draw(){
     const ex=sel.value, h=D.ex_history[ex], g=D.ex_group[ex];
-    const W=1000,H=230,M={l:44,r:14,t:26,b:34};
+    const W=1000,H=230,M={l:44,r:34,t:26,b:34};
     const s=svg(document.getElementById('exchart'),W,H);
-    const vs=h.map(x=>x.v).concat(HAS_BW?BW_POINTS.map(p=>p.v):[]);
+    const vs=h.map(x=>x.v).concat(HAS_BW?BW_POINTS.map(p=>p.v).concat(BW_KG):[]);
     const hi=Math.ceil(Math.max(...vs)/10)*10+5, lo=0;
     const ticks=[];for(let v=0;v<=hi;v+=hi/4)ticks.push(v);
     const f=frame(s,W,H,M,lo,hi,v=>Math.round(v),ticks);
-    if(HAS_BW) drawBWOverlay(s,f,M,W,BW_POINTS);
+    if(HAS_BW){ drawBWOverlay(s,f,M,W,BW_POINTS); drawBWScale(s,f,M,W,kg=>kg); }
     ['Gym A','Gym B'].forEach(gy=>{
       const p=h.filter(x=>x.gym===gy);
       path(s,p.map(x=>[f.X(x.date),f.Y(x.v)]),GC[g],2.2);
@@ -1097,7 +1116,7 @@ function drawBWOverlay(s,f,M,W,series){
     document.getElementById('exstats').innerHTML=
       `<span>${h.length} sessions</span><span>first ${h[0].v} kg</span>
        <span>last ${h[h.length-1].v} kg</span>
-       <span>peak ${Math.max(...vs)} kg</span>
+       <span>peak ${Math.max(...h.map(x=>x.v))} kg</span>
        ${r&&r.top_w!=null?`<span>heaviest ${r.top_w} kg × ${r.top_w_reps}</span>`:''}`;
   }
 })();
@@ -1122,8 +1141,13 @@ function drawBWOverlay(s,f,M,W,series){
     const W=1000,H=190,M={l:44,r:14,t:26,b:34};
     const s=svg(document.getElementById(`health-${name}`),W,H);
     const vs=pts.map(x=>x.v);
-    const lo=Math.floor(Math.min(...vs)-1), hi=Math.ceil(Math.max(...vs)+1);
-    const ticks=[];for(let v=lo;v<=hi;v+=(hi-lo)/4)ticks.push(Math.round(v*10)/10);
+    const isBW=name==='bodyweight';
+    // bodyweight uses the same fixed BW_KG range as every other chart's kg scale
+    const lo=isBW?Math.min(BW_KG[0],Math.floor(Math.min(...vs))):Math.floor(Math.min(...vs)-1);
+    const hi=isBW?Math.max(BW_KG[1],Math.ceil(Math.max(...vs))):Math.ceil(Math.max(...vs)+1);
+    const ticks=[];
+    if(isBW){ ticks.push(lo); for(let v=Math.ceil((lo+1)/5)*5;v<hi;v+=5) ticks.push(v); ticks.push(hi); }
+    else for(let v=lo;v<=hi;v+=(hi-lo)/4)ticks.push(Math.round(v*10)/10);
     // this metric's own date range, not the training sessions' T0-T1 - a
     // metric can be logged for longer than sessions have been tracked, and
     // borrowing the session range would silently drop readings outside it
@@ -1141,9 +1165,12 @@ function drawBWOverlay(s,f,M,W,series){
     const defs=mk(s,'defs',{});
     mk(mk(defs,'clipPath',{id:clipId}),'rect',{x:M.l,y:M.t,width:f.iw,height:f.ih});
     const g=mk(s,'g',{'clip-path':`url(#${clipId})`});
-    path(g,pts.map(x=>[f.X(x.date),f.Y(x.v)]),INK,2.2);
+    const col=isBW?BW_RED:INK;
+    path(g,pts.map(x=>[f.X(x.date),f.Y(x.v)]),col,2.2,isBW?'6 4':null);
     pts.forEach(x=>{
-      const c=mk(g,'circle',{cx:f.X(x.date),cy:f.Y(x.v),r:3.2,fill:INK});
+      const c=mk(g,'circle',isBW
+        ? {cx:f.X(x.date),cy:f.Y(x.v),r:3,fill:GROUND,stroke:col,'stroke-width':2}
+        : {cx:f.X(x.date),cy:f.Y(x.v),r:3.2,fill:INK});
       hoverable(c,`${md(x.date)} ${new Date(x.date).getFullYear()}\n${x.v} ${unit}`);
     });
     txt(s,M.l-34,M.t-10,unit,'axl','start');
