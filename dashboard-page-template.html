@@ -540,16 +540,34 @@ function bwLabelPoint(series,f){
   const atT0=valueAtOrBefore(series,T0);
   return atT0!=null ? [f.X(T0),f.Y(atT0)] : [f.X(series[0].date),f.Y(series[0].v)];
 }
+// readings only a few pixels apart (e.g. daily weigh-ins) would draw as a
+// dashed zigzag too short to read, so each run of close readings is merged
+// into one step at the run's first date, valued at the run's mean
+function bwMergeClose(series,X,minPx){
+  const out=[];let run=[];
+  const flush=()=>{ if(run.length) out.push({date:run[0].date,
+    v:run.reduce((a,p)=>a+p.v,0)/run.length}); run=[]; };
+  for(const p of series){
+    if(run.length && X(p.date)-X(run[run.length-1].date)>=minPx) flush();
+    run.push(p);
+  }
+  flush();
+  return out;
+}
 let CLIP_N=0;
+// clip rect matching a chart's plot area; returns the url() for clip-path
+function frameClip(s,f,M){
+  const id='frame-clip-'+(CLIP_N++);
+  mk(mk(mk(s,'defs',{}),'clipPath',{id}),'rect',{x:M.l,y:M.t,width:f.iw,height:f.ih});
+  return `url(#${id})`;
+}
 // draws the dashed bodyweight overlay, clipped to the chart's own frame so a
 // real reading from before this chart's date range never bleeds past the axis
 function drawBWOverlay(s,f,M,W,series){
   if(series.length<2) return;
-  const id='bw-clip-'+(CLIP_N++);
-  const defs=mk(s,'defs',{});
-  mk(mk(defs,'clipPath',{id}),'rect',{x:M.l,y:M.t,width:f.iw,height:f.ih});
-  const p=path(s,bwStepPoints(series,f.X,f.Y),DIM,1.6,'5 4');
-  if(p) p.setAttribute('clip-path',`url(#${id})`);
+  const clip=frameClip(s,f,M);
+  const p=path(s,bwStepPoints(bwMergeClose(series,f.X,12),f.X,f.Y),DIM,1.6,'5 4');
+  if(p) p.setAttribute('clip-path',clip);
   const [lx,ly]=bwLabelPoint(series,f);
   txt(s,lx,ly-7,'BODYWEIGHT','axl','start');
 }
@@ -645,13 +663,19 @@ function drawBWOverlay(s,f,M,W,series){
   const ticks=[];for(let v=y0;v<=y1;v+=5)ticks.push(v);
   const f=frame(s,W,H,M,y0,y1,v=>v,ticks);
   mk(s,'line',{x1:M.l,x2:W-M.r,y1:f.Y(100),y2:f.Y(100),stroke:INK,'stroke-width':1,opacity:.35});
-  txt(s,M.l+4,f.Y(100)-5,'BASELINE 100','axl','start');
+  // right-hand end: the left edge is where both the index and bodyweight lines
+  // start near 100, so a label there collides with them
+  txt(s,W-M.r-4,f.Y(100)-5,'BASELINE 100','axl','end');
   if(HAS_BW) drawBWOverlay(s,f,M,W,BW_INDEXED);
+  // monthly points are dated to the 1st, so the first can fall before T0;
+  // clip so it doesn't run out over the y-axis labels
+  const clip=frameClip(s,f,M);
   const pts=D.overall.map(o=>[f.X(o.date),f.Y(o.value)]);
-  path(s,pts,INK,2.4);
+  const lp=path(s,pts,INK,2.4);
+  if(lp) lp.setAttribute('clip-path',clip);
   D.overall.forEach((o,i)=>{
     const c=mk(s,'circle',{cx:pts[i][0],cy:pts[i][1],r:3.6,fill:'#E6E9E4',
-      stroke:INK,'stroke-width':2});
+      stroke:INK,'stroke-width':2,'clip-path':clip});
     const bwIdx=bwIndexAt(o.date);
     hoverable(c,`${my(o.date)}\nindex ${o.value}\n${o.n} muscle groups in range${bwIdx?`\n${(o.value/bwIdx).toFixed(2)}× bodyweight index`:''}`);
   });
