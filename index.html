@@ -24,6 +24,7 @@
   --ink:#15181A; --dim:#697077; --faint:#98A0A4; --rule:#CBD0CA;
   --Chest:#C8102E; --Back:#0057B8; --Shoulders:#B37800; --Legs:#00713A;
   --Biceps:#6B3FA0; --Triceps:#C24A15; --Core:#5A6469;
+  --bw:#B4169F;
   --seam:#15181A;
   --disp:"IBM Plex Sans Condensed",'Arial Narrow',sans-serif;
   --body:"IBM Plex Sans",system-ui,sans-serif;
@@ -34,6 +35,7 @@
   --ink:#ECEEEC; --dim:#9BA3A8; --faint:#6B7278; --rule:#33383D;
   --Chest:#FF5C72; --Back:#5B9CFF; --Shoulders:#E0A93F; --Legs:#3FC17B;
   --Biceps:#B08AE8; --Triceps:#F0834E; --Core:#9AA3A8;
+  --bw:#F266E0;
   --seam:#ECEEEC;
 }
 @media (prefers-color-scheme: dark){
@@ -42,6 +44,7 @@
     --ink:#ECEEEC; --dim:#9BA3A8; --faint:#6B7278; --rule:#33383D;
     --Chest:#FF5C72; --Back:#5B9CFF; --Shoulders:#E0A93F; --Legs:#3FC17B;
     --Biceps:#B08AE8; --Triceps:#F0834E; --Core:#9AA3A8;
+    --bw:#F266E0;
     --seam:#ECEEEC;
   }
 }
@@ -531,9 +534,10 @@ function bwInterpAt(series,date){
   }
   return null;
 }
-// bodyweight series colour on every chart (theme-aware red, via --Chest) and
+// bodyweight series colour on every chart (theme-aware magenta, --bw: kept
+// clear of every muscle-group colour and the #D6006D sick marker) and
 // the fixed kg range its right-hand reference scale always covers
-const BW_RED = GC.Chest;
+const BW_COLOR = CSSV.getPropertyValue('--bw').trim();
 const BW_KG = [68,85];
 let CLIP_N=0;
 // clip rect matching a chart's plot area; returns the url() for clip-path
@@ -546,7 +550,7 @@ function frameClip(s,f,M){
 // with a dot per reading, clipped to the chart's own frame so readings from
 // before this chart's date range never bleed past the axis. series is always
 // a 1:1 map of BW_POINTS, so the dot tooltips can quote the raw kg.
-function drawBWOverlay(s,f,M,W,series,color=BW_RED,width=2.2){
+function drawBWOverlay(s,f,M,W,series,color=BW_COLOR,width=2.2){
   if(series.length<2) return;
   const clip=frameClip(s,f,M);
   const pts=series.map(p=>[f.X(p.date),f.Y(p.v)]);
@@ -562,14 +566,14 @@ function drawBWOverlay(s,f,M,W,series,color=BW_RED,width=2.2){
   const l=txt(s,lx+4,ly-9,'BODYWEIGHT','axl','start');
   l.style.fill=color;
 }
-// red kg reference scale down the chart's right edge (needs M.r >= 34) for
+// kg reference scale down the chart's right edge (needs M.r >= 34) for
 // the bodyweight line, spanning BW_KG. toV maps kg into the chart's own
 // y-units (index, % change or plain kg); callers include toV(BW_KG[0/1]) in
 // their y-domain so the whole range is on screen. Labels are thinned to keep
 // ~11px apart, so a squashed kg-axis chart still shows at least the ends.
 function drawBWScale(s,f,M,W,toV){
   const ax=W-M.r+6, y=kg=>f.Y(toV(kg)), [lo,hi]=BW_KG;
-  const line=a=>mk(s,'line',{...a,stroke:BW_RED,'stroke-width':1,opacity:.7});
+  const line=a=>mk(s,'line',{...a,stroke:BW_COLOR,'stroke-width':1,opacity:.7});
   line({x1:ax,x2:ax,y1:y(hi),y2:y(lo)});
   if(Math.abs(y(lo)-y(lo+1))>=3)
     for(let k=lo;k<=hi;k++) line({x1:ax,x2:ax+2,y1:y(k),y2:y(k)});
@@ -578,9 +582,9 @@ function drawBWScale(s,f,M,W,toV){
     if(placed.some(q=>Math.abs(y(q)-y(k))<11)) return;
     placed.push(k);
     line({x1:ax,x2:ax+4,y1:y(k),y2:y(k)});
-    txt(s,ax+7,y(k)+3.4,k,'ax','start').style.fill=BW_RED;
+    txt(s,ax+7,y(k)+3.4,k,'ax','start').style.fill=BW_COLOR;
   });
-  txt(s,ax,y(hi)-9,'kg','axl','start').style.fill=BW_RED;
+  txt(s,ax,y(hi)-9,'kg','axl','start').style.fill=BW_COLOR;
 }
 
 /* ---------------------------------------------------------------- 00 figures */
@@ -679,7 +683,7 @@ function drawBWScale(s,f,M,W,toV){
   // start near 100, so a label there collides with them
   txt(s,W-M.r-4,f.Y(100)-5,'BASELINE 100','axl','end');
   // bodyweight at the index line's own weight, so it reads as a peer series
-  if(HAS_BW){ drawBWOverlay(s,f,M,W,BW_INDEXED,BW_RED,2.4); drawBWScale(s,f,M,W,bwIdx); }
+  if(HAS_BW){ drawBWOverlay(s,f,M,W,BW_INDEXED,BW_COLOR,2.4); drawBWScale(s,f,M,W,bwIdx); }
   // monthly points are dated to the 1st, so the first can fall before T0;
   // clip so it doesn't run out over the y-axis labels
   const clip=frameClip(s,f,M);
@@ -1165,7 +1169,7 @@ function drawBWScale(s,f,M,W,toV){
     const defs=mk(s,'defs',{});
     mk(mk(defs,'clipPath',{id:clipId}),'rect',{x:M.l,y:M.t,width:f.iw,height:f.ih});
     const g=mk(s,'g',{'clip-path':`url(#${clipId})`});
-    const col=isBW?BW_RED:INK;
+    const col=isBW?BW_COLOR:INK;
     path(g,pts.map(x=>[f.X(x.date),f.Y(x.v)]),col,2.2,isBW?'6 4':null);
     pts.forEach(x=>{
       const c=mk(g,'circle',isBW
