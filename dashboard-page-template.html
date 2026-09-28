@@ -1145,7 +1145,10 @@ function drawBWScale(s,f,M,W,toV){
   document.getElementById('health').style.display='';
   const grid=document.getElementById('healthgrid');
   names.forEach(name=>{
-    const m=metrics[name], pts=m.points, unit=m.unit;
+    // bodyweight's standalone chart also carries older history readings
+    // that the strength-chart overlays deliberately leave out
+    const m=metrics[name], unit=m.unit;
+    const pts=(m.history||[]).concat(m.points).sort((a,b)=>a.date<b.date?-1:1);
     const label=name.replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
     const card=document.createElement('div');
     card.className='card';

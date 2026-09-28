@@ -53,6 +53,21 @@ def load_metric_files():
         out[name] = {'unit': unit, 'points': points}
     return out
 
+def load_bodyweight_history():
+    """bodyweight-history-kg.csv: older 'date,value' readings (e.g. read off a
+    screenshot from another app). Shown only on the standalone bodyweight
+    chart - kept out of metric-bodyweight-kg.csv so the strength-chart overlays
+    and their rebasing stay on the recent series."""
+    path = os.path.join(HERE, 'bodyweight-history-kg.csv')
+    if not os.path.exists(path): return []
+    pts = []
+    for line in open(path, encoding='utf-8-sig'):
+        parts = [p.strip() for p in line.strip().split(',')]
+        if len(parts) == 2:
+            try: pts.append({'date': parts[0], 'v': round(float(parts[1]), 1)})
+            except ValueError: pass
+    return sorted(pts, key=lambda r: r['date'])
+
 def read_csv(path):
     """Uploads sometimes gain a stray first line holding the file name.
     Skip anything above the real header row."""
@@ -409,6 +424,10 @@ payload={
    'km':float(r.km) if pd.notna(r.km) and r.km else None} for r in cardio.itertuples()],
  'health_metrics':load_metric_files(),
 }
+if 'bodyweight' in payload['health_metrics']:
+    have = {p['date'] for p in payload['health_metrics']['bodyweight']['points']}
+    payload['health_metrics']['bodyweight']['history'] = [
+        p for p in load_bodyweight_history() if p['date'] not in have]
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 open(OUT,'w').write(open(TPL).read().replace('__DATA__', json.dumps(payload)))
 
