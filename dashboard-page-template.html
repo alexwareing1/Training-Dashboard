@@ -23,7 +23,7 @@
   --ground:#E6E9E4; --panel:#F7F8F6; --panel2:#EFF1ED;
   --ink:#15181A; --dim:#697077; --faint:#98A0A4; --rule:#CBD0CA;
   --Chest:#C8102E; --Back:#0057B8; --Shoulders:#B37800; --Legs:#00713A;
-  --Biceps:#6B3FA0; --Triceps:#C24A15; --Core:#5A6469;
+  --Biceps:#6B3FA0; --Triceps:#C24A15; --Forearms:#0E7C86; --Core:#5A6469;
   --bw:#B4169F;
   --seam:#15181A;
   --disp:"IBM Plex Sans Condensed",'Arial Narrow',sans-serif;
@@ -34,7 +34,7 @@
   --ground:#111315; --panel:#191C1F; --panel2:#202327;
   --ink:#ECEEEC; --dim:#9BA3A8; --faint:#6B7278; --rule:#33383D;
   --Chest:#FF5C72; --Back:#5B9CFF; --Shoulders:#E0A93F; --Legs:#3FC17B;
-  --Biceps:#B08AE8; --Triceps:#F0834E; --Core:#9AA3A8;
+  --Biceps:#B08AE8; --Triceps:#F0834E; --Forearms:#3CC4CF; --Core:#9AA3A8;
   --bw:#F266E0;
   --seam:#ECEEEC;
 }
@@ -43,7 +43,7 @@
     --ground:#111315; --panel:#191C1F; --panel2:#202327;
     --ink:#ECEEEC; --dim:#9BA3A8; --faint:#6B7278; --rule:#33383D;
     --Chest:#FF5C72; --Back:#5B9CFF; --Shoulders:#E0A93F; --Legs:#3FC17B;
-    --Biceps:#B08AE8; --Triceps:#F0834E; --Core:#9AA3A8;
+    --Biceps:#B08AE8; --Triceps:#F0834E; --Forearms:#3CC4CF; --Core:#9AA3A8;
     --bw:#F266E0;
     --seam:#ECEEEC;
   }
@@ -407,9 +407,9 @@ const CSSV = getComputedStyle(document.documentElement);
 const INK = CSSV.getPropertyValue('--ink').trim();
 const GROUND = CSSV.getPropertyValue('--ground').trim();
 const DIM = CSSV.getPropertyValue('--dim').trim();
-const GROUP_NAMES = ['Chest','Back','Shoulders','Legs','Biceps','Triceps','Core'];
+const GROUP_NAMES = ['Chest','Back','Shoulders','Legs','Biceps','Triceps','Forearms','Core'];
 const GC = Object.fromEntries(GROUP_NAMES.map(g=>[g, CSSV.getPropertyValue('--'+g).trim()]));
-const GROUPS = ['Chest','Back','Shoulders','Biceps','Triceps','Legs','Core'];
+const GROUPS = ['Chest','Back','Shoulders','Biceps','Triceps','Forearms','Legs','Core'];
 const SWITCH = new Date(D.meta.switch);
 const T0 = new Date(D.meta.first), T1 = new Date(D.meta.last);
 const NS = 'http://www.w3.org/2000/svg';
