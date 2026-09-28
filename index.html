@@ -1144,14 +1144,27 @@ function drawBWScale(s,f,M,W,toV){
   if(!names.length) return;
   document.getElementById('health').style.display='';
   const grid=document.getElementById('healthgrid');
+  // one chart per metric; bodyweight also gets a year-to-date copy directly
+  // below it, on a tighter kg scale so this year's detail isn't flattened
+  const charts=[];
   names.forEach(name=>{
+    const m=metrics[name];
     // bodyweight's standalone chart also carries older history readings
     // that the strength-chart overlays deliberately leave out
-    const m=metrics[name], unit=m.unit;
     const pts=(m.history||[]).concat(m.points).sort((a,b)=>a.date<b.date?-1:1);
     const label=name.replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+    charts.push({name,label,pts,unit:m.unit,isBW:name==='bodyweight'});
+    if(name==='bodyweight'){
+      const now=new Date(), y0=new Date(now.getFullYear(),0,1);
+      const ytd=pts.filter(x=>new Date(x.date)>=y0);
+      if(ytd.length) charts.push({name:'bodyweight-ytd',label:`${label} · ${now.getFullYear()} so far`,
+        pts:ytd,unit:m.unit,isBW:true,ytd:true,t0:y0,t1:new Date(Math.max(+now,+new Date(ytd[ytd.length-1].date)))});
+    }
+  });
+  charts.forEach(({name,label,pts,unit,isBW,ytd,t0,t1})=>{
     const card=document.createElement('div');
     card.className='card';
+    if(isBW) card.style.gridColumn='1/-1';
     card.innerHTML=`<div class="seambar"><span>${label}</span></div>
       <div id="health-${name}" style="margin-top:14px"></div>
       <div id="health-${name}-stats" class="legend"></div>`;
@@ -1160,19 +1173,22 @@ function drawBWScale(s,f,M,W,toV){
     const W=1000,H=190,M={l:44,r:14,t:26,b:34};
     const s=svg(document.getElementById(`health-${name}`),W,H);
     const vs=pts.map(x=>x.v);
-    const isBW=name==='bodyweight';
-    // bodyweight uses the same fixed BW_KG range as every other chart's kg scale
-    const lo=isBW?Math.min(BW_KG[0],Math.floor(Math.min(...vs))):Math.floor(Math.min(...vs)-1);
-    const hi=isBW?Math.max(BW_KG[1],Math.ceil(Math.max(...vs))):Math.ceil(Math.max(...vs)+1);
+    // bodyweight uses the same fixed BW_KG range as every other chart's kg
+    // scale; the year-to-date copy fits its own readings instead
+    const lo=ytd?Math.floor(Math.min(...vs))-1
+      :isBW?Math.min(BW_KG[0],Math.floor(Math.min(...vs))):Math.floor(Math.min(...vs)-1);
+    const hi=ytd?Math.ceil(Math.max(...vs))+1
+      :isBW?Math.max(BW_KG[1],Math.ceil(Math.max(...vs))):Math.ceil(Math.max(...vs)+1);
     const ticks=[];
-    if(isBW){ ticks.push(lo); for(let v=Math.ceil((lo+1)/5)*5;v<hi;v+=5) ticks.push(v); ticks.push(hi); }
+    if(ytd){ const st=hi-lo>8?2:1; for(let v=lo;v<=hi;v+=st) ticks.push(v); }
+    else if(isBW){ ticks.push(lo); for(let v=Math.ceil((lo+1)/5)*5;v<hi;v+=5) ticks.push(v); ticks.push(hi); }
     else for(let v=lo;v<=hi;v+=(hi-lo)/4)ticks.push(Math.round(v*10)/10);
     // this metric's own date range, not the training sessions' T0-T1 - a
     // metric can be logged for longer than sessions have been tracked, and
     // borrowing the session range would silently drop readings outside it
     // even though they still count in the stats line below
-    let mT0,mT1;
-    if(pts.length>=2){
+    let mT0=t0,mT1=t1;
+    if(!ytd && pts.length>=2){
       const mDates=pts.map(x=>+new Date(x.date));
       mT0=new Date(Math.min(...mDates)); mT1=new Date(Math.max(...mDates));
     } // a single reading has no range of its own - frame() falls back to T0-T1
