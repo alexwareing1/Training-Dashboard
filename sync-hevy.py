@@ -32,6 +32,7 @@ venue / sick columns:
     description (or any exercise note) and this script copies them across:
         #sick                -> sick   = True
         #guest:VenueName     -> venue  = VenueName
+        #away / #awayday     -> venue  = "Away day" (when no #guest: is given)
     The venue value runs to the end of the line or the next '#', ',' or ';',
     so either put #guest: last or separate it, e.g.
         "#sick #guest:Prime Fitness"  or  "#guest:Prime Fitness, felt rough".
@@ -89,6 +90,7 @@ MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
 
 TAG_SICK  = re.compile(r"#sick\b", re.I)
 TAG_GUEST = re.compile(r"#guest:\s*([^\n#,;]+)", re.I)
+TAG_AWAY  = re.compile(r"#away(?:day)?\b", re.I)
 
 
 # ---------------------------------------------------------------- helpers -----
@@ -244,7 +246,8 @@ def workout_tags(w):
     text = " ".join([w.get("description") or ""]
                     + [e.get("notes") or "" for e in w.get("exercises", [])])
     m = TAG_GUEST.search(text)
-    return (m.group(1).strip() if m else ""), ("True" if TAG_SICK.search(text) else "")
+    venue = m.group(1).strip() if m else ("Away day" if TAG_AWAY.search(text) else "")
+    return venue, ("True" if TAG_SICK.search(text) else "")
 
 
 def workout_to_rows(w, tz):
