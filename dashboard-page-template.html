@@ -184,6 +184,30 @@ footer li{margin-bottom:5px}
   .scroll{overflow-x:auto}
   .scroll table{min-width:560px}
 }
+
+/* ---------- zoom ---------- */
+.card{position:relative}
+.zoombtn{position:absolute;top:6px;right:6px;z-index:2;font-family:var(--mono);font-size:10px;
+  letter-spacing:.08em;text-transform:uppercase;padding:3px 7px;border:1px solid var(--rule);
+  background:var(--panel);color:var(--dim);border-radius:2px;cursor:zoom-in;opacity:.75}
+.zoombtn:hover,.zoombtn:focus-visible{opacity:1;color:var(--ink);border-color:var(--ink)}
+.zoombtn:focus-visible,.zoomtools button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.zoomwrap{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.55);display:flex;
+  align-items:center;justify-content:center;padding:16px}
+.zoomwrap[hidden]{display:none}
+.zoompanel{background:var(--panel);border:1px solid var(--rule);border-radius:3px;
+  width:min(1400px,100%);max-height:100%;display:flex;flex-direction:column;padding:12px 14px 14px}
+.zoomtools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.zoomtools .ttl{flex:1 1 auto;font-family:var(--mono);font-size:11px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--dim)}
+.zoomtools button{font-family:var(--mono);font-size:13px;min-width:32px;padding:4px 9px;
+  border:1px solid var(--rule);background:var(--panel2);color:var(--ink);border-radius:2px;cursor:pointer}
+.zoomstage{overflow:hidden;touch-action:none;cursor:grab;border:1px solid var(--rule);
+  border-radius:2px;background:var(--ground)}
+.zoomstage.dragging{cursor:grabbing}
+.zoomstage svg{max-height:calc(100vh - 140px)}
+.zoomstage svg :is(path,line,rect,circle,polyline){vector-effect:non-scaling-stroke}
+.zoomhint{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:8px}
 </style>
 </head>
 <body>
@@ -381,6 +405,19 @@ footer li{margin-bottom:5px}
 
 </div>
 <div class="tip" id="tip"></div>
+<div class="zoomwrap" id="zoomwrap" hidden role="dialog" aria-modal="true" aria-labelledby="zoomttl">
+  <div class="zoompanel">
+    <div class="zoomtools">
+      <span class="ttl" id="zoomttl">Chart</span>
+      <button type="button" id="zoomin" aria-label="Zoom in">+</button>
+      <button type="button" id="zoomout" aria-label="Zoom out">&minus;</button>
+      <button type="button" id="zoomreset">Reset</button>
+      <button type="button" id="zoomclose" aria-label="Close">&times;</button>
+    </div>
+    <div class="zoomstage" id="zoomstage"></div>
+    <div class="zoomhint">Scroll or pinch to zoom &middot; drag to pan &middot; double-click to reset &middot; Esc to close</div>
+  </div>
+</div>
 
 <script>
 const D = __DATA__;
@@ -424,7 +461,9 @@ function svg(el,w,h){
   s.setAttribute('viewBox',`0 0 ${w} ${h}`);
   s.setAttribute('preserveAspectRatio','xMidYMid meet');
   s.setAttribute('role','img');
-  el.innerHTML=''; el.appendChild(s); return s;
+  el.innerHTML=''; el.appendChild(s);
+  if(w>=400) addZoomButton(el);
+  return s;
 }
 function mk(p,t,a){const e=document.createElementNS(NS,t);
   for(const k in a) e.setAttribute(k,a[k]); p.appendChild(e); return e;}
@@ -434,7 +473,7 @@ function txt(p,x,y,s,cls,anchor){
 
 const tip=document.getElementById('tip');
 function hoverable(node,text){
-  const show=e=>{tip.textContent=text;tip.style.opacity=1;
+  const show=e=>{tip.textContent=typeof text==='function'?text(e):text;tip.style.opacity=1;
     const x=(e.touches?e.touches[0].clientX:e.clientX), y=(e.touches?e.touches[0].clientY:e.clientY);
     tip.style.left=Math.min(x+12,innerWidth-tip.offsetWidth-8)+'px';
     tip.style.top=Math.max(y-tip.offsetHeight-10,8)+'px';};
@@ -533,20 +572,31 @@ function frameClip(s,f,M){
   return `url(#${id})`;
 }
 // draws the dashed bodyweight overlay point-to-point through each real reading,
-// with a dot per reading, clipped to the chart's own frame so readings from
+// line only (no dots, so dense stretches stay legible), clipped to the chart's own frame so readings from
 // before this chart's date range never bleed past the axis. series is always
-// a 1:1 map of BW_POINTS, so the dot tooltips can quote the raw kg.
+// a 1:1 map of BW_POINTS, so the hover tooltip can quote the raw kg.
+// invisible wide stroke along a line; hovering reports the reading nearest the pointer
+function bwHoverLine(s,pts,clip,label){
+  const hit=path(s,pts,'transparent',14);
+  if(!hit) return;
+  hit.setAttribute('pointer-events','stroke');
+  if(clip) hit.setAttribute('clip-path',clip);
+  hoverable(hit,e=>{
+    const cx=e.touches?e.touches[0].clientX:e.clientX, cy=e.touches?e.touches[0].clientY:e.clientY;
+    const pt=s.createSVGPoint(); pt.x=cx; pt.y=cy;
+    const loc=pt.matrixTransform(s.getScreenCTM().inverse());
+    let bi=0,bd=Infinity;
+    pts.forEach((q,i)=>{const d=Math.abs(q[0]-loc.x); if(d<bd){bd=d;bi=i;}});
+    return label(bi);
+  });
+}
 function drawBWOverlay(s,f,M,W,series,color=BW_COLOR,width=2.2){
   if(series.length<2) return;
   const clip=frameClip(s,f,M);
   const pts=series.map(p=>[f.X(p.date),f.Y(p.v)]);
   const p=path(s,pts,color,width,'6 4');
   if(p) p.setAttribute('clip-path',clip);
-  series.forEach((pt,i)=>{
-    const c=mk(s,'circle',{cx:pts[i][0],cy:pts[i][1],r:width>2.3?3.6:3,fill:GROUND,
-      stroke:color,'stroke-width':2,'clip-path':clip});
-    hoverable(c,`${md(pt.date)} ${new Date(pt.date).getFullYear()}\nbodyweight ${BW_POINTS[i].v} kg`);
-  });
+  bwHoverLine(s,pts,clip,i=>`${md(series[i].date)} ${new Date(series[i].date).getFullYear()}\nbodyweight ${BW_POINTS[i].v} kg`);
   const atT0=bwInterpAt(series,T0);
   const [lx,ly]=atT0!=null ? [f.X(T0),f.Y(atT0)] : pts[0];
   const l=txt(s,lx+4,ly-9,'BODYWEIGHT','axl','start');
@@ -1132,13 +1182,11 @@ function drawBWScale(s,f,M,W,toV){
     mk(mk(defs,'clipPath',{id:clipId}),'rect',{x:M.l,y:M.t,width:f.iw,height:f.ih});
     const g=mk(s,'g',{'clip-path':`url(#${clipId})`});
     const col=isBW?BW_COLOR:INK;
-    path(g,pts.map(x=>[f.X(x.date),f.Y(x.v)]),col,2.2,isBW?'6 4':null);
-    pts.forEach(x=>{
-      const c=mk(g,'circle',isBW
-        ? {cx:f.X(x.date),cy:f.Y(x.v),r:3,fill:GROUND,stroke:col,'stroke-width':2}
-        : {cx:f.X(x.date),cy:f.Y(x.v),r:3.2,fill:INK});
-      hoverable(c,`${md(x.date)} ${new Date(x.date).getFullYear()}\n${x.v} ${unit}`);
-    });
+    const xy=pts.map(x=>[f.X(x.date),f.Y(x.v)]);
+    path(g,xy,col,2.2,isBW?'6 4':null);
+    const tipFor=i=>`${md(pts[i].date)} ${new Date(pts[i].date).getFullYear()}\n${pts[i].v} ${unit}`;
+    if(isBW && pts.length>=2) bwHoverLine(g,xy,null,tipFor);
+    else pts.forEach((x,i)=>hoverable(mk(g,'circle',{cx:xy[i][0],cy:xy[i][1],r:3.2,fill:INK}),tipFor(i)));
     txt(s,M.l-34,M.t-10,unit,'axl','start');
 
     document.getElementById(`health-${name}-stats`).innerHTML=
@@ -1149,6 +1197,107 @@ function drawBWScale(s,f,M,W,toV){
        <span>max ${Math.max(...vs)} ${unit}</span>`;
   });
 })();
+
+/* ---------------------------------------------------------------- zoom viewer
+   The chart's own <svg> is moved into the dialog (keeping its tooltips) and
+   zoomed by rewriting its viewBox; it goes back to its card on close. */
+function addZoomButton(el){
+  const card=el.closest('.card');
+  if(!card || card.querySelector(':scope > .zoombtn')) return;
+  const b=document.createElement('button');
+  b.type='button'; b.className='zoombtn'; b.textContent='⤢ Zoom';
+  b.setAttribute('aria-label','Zoom this chart');
+  b.addEventListener('click',()=>openZoom(el,card,b));
+  card.prepend(b);
+}
+const ZW=document.getElementById('zoomwrap'), ZS=document.getElementById('zoomstage');
+let Z=null;   // {svg, home, marker, base:[x,y,w,h], vb:[x,y,w,h], opener}
+function titleFor(card){
+  const sec=card.closest('section');
+  const own=card.querySelector('.seambar span');
+  const h=sec&&sec.querySelector('.shead h2');
+  return [h&&h.textContent, own&&own.textContent].filter(Boolean).join(' · ') || 'Chart';
+}
+function openZoom(el,card,opener){
+  const svgEl=el.querySelector('svg'); if(!svgEl) return;
+  const base=svgEl.getAttribute('viewBox').split(/\s+/).map(Number);
+  const marker=document.createComment('zoom');
+  svgEl.replaceWith(marker);
+  ZS.appendChild(svgEl);
+  Z={svg:svgEl,marker,base,vb:base.slice(),opener};
+  document.getElementById('zoomttl').textContent=titleFor(card);
+  ZW.hidden=false; document.body.style.overflow='hidden';
+  document.getElementById('zoomclose').focus();
+}
+function closeZoom(){
+  if(!Z) return;
+  setVB(...Z.base);
+  if(Z.marker.isConnected) Z.marker.replaceWith(Z.svg); else Z.svg.remove();
+  ZW.hidden=true; document.body.style.overflow=''; tip.style.opacity=0;
+  const o=Z.opener; Z=null; if(o) o.focus();
+}
+function setVB(x,y,w,h){
+  const [bx,by,bw,bh]=Z.base;
+  w=Math.min(bw,Math.max(bw/20,w)); h=w*bh/bw;          // 1× to 20×, aspect locked
+  x=Math.min(bx+bw-w,Math.max(bx,x)); y=Math.min(by+bh-h,Math.max(by,y));
+  Z.vb=[x,y,w,h]; Z.svg.setAttribute('viewBox',Z.vb.join(' '));
+  // keep dots at their normal on-screen size instead of ballooning with the zoom
+  Z.svg.querySelectorAll('circle').forEach(c=>{
+    if(!c.dataset.r0) c.dataset.r0=c.getAttribute('r');
+    c.setAttribute('r',c.dataset.r0*w/bw);
+  });
+}
+function toSvg(cx,cy){   // client px -> current viewBox coords
+  const r=Z.svg.getBoundingClientRect(), [x,y,w,h]=Z.vb;
+  return [x+(cx-r.left)/r.width*w, y+(cy-r.top)/r.height*h];
+}
+function zoomAt(f,cx,cy){
+  if(!Z) return;
+  const r=Z.svg.getBoundingClientRect();
+  if(cx==null){ cx=r.left+r.width/2; cy=r.top+r.height/2; }
+  const [px,py]=toSvg(cx,cy), [x,y,w,h]=Z.vb, nw=w/f, nh=h/f;
+  setVB(px-(px-x)/w*nw, py-(py-y)/h*nh, nw, nh);
+}
+document.getElementById('zoomin').onclick=()=>zoomAt(1.5);
+document.getElementById('zoomout').onclick=()=>zoomAt(1/1.5);
+document.getElementById('zoomreset').onclick=()=>Z&&setVB(...Z.base);
+document.getElementById('zoomclose').onclick=closeZoom;
+ZW.addEventListener('click',e=>{ if(e.target===ZW) closeZoom(); });
+document.addEventListener('keydown',e=>{
+  if(!Z) return;
+  if(e.key==='Escape') closeZoom();
+  else if(e.key==='+'||e.key==='=') zoomAt(1.5);
+  else if(e.key==='-') zoomAt(1/1.5);
+  else if(e.key==='0') setVB(...Z.base);
+});
+ZS.addEventListener('wheel',e=>{
+  if(!Z) return; e.preventDefault();
+  zoomAt(Math.exp(-e.deltaY*(e.deltaMode?0.05:0.0022)),e.clientX,e.clientY);
+},{passive:false});
+ZS.addEventListener('dblclick',()=>Z&&setVB(...Z.base));
+// drag to pan, two fingers to pinch
+const ptrs=new Map(); let pinch0=null;
+ZS.addEventListener('pointerdown',e=>{
+  if(!Z) return;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  ZS.setPointerCapture(e.pointerId); ZS.classList.add('dragging');
+  if(ptrs.size===2){ const [a,b]=[...ptrs.values()]; pinch0=Math.hypot(a.x-b.x,a.y-b.y); }
+});
+ZS.addEventListener('pointermove',e=>{
+  if(!Z||!ptrs.has(e.pointerId)) return;
+  const prev=ptrs.get(e.pointerId), cur={x:e.clientX,y:e.clientY};
+  ptrs.set(e.pointerId,cur);
+  if(ptrs.size===2 && pinch0){
+    const [a,b]=[...ptrs.values()], d=Math.hypot(a.x-b.x,a.y-b.y);
+    zoomAt(d/pinch0,(a.x+b.x)/2,(a.y+b.y)/2); pinch0=d;
+  } else if(ptrs.size===1){
+    const r=Z.svg.getBoundingClientRect(), [x,y,w,h]=Z.vb;
+    setVB(x-(cur.x-prev.x)/r.width*w, y-(cur.y-prev.y)/r.height*h, w, h);
+  }
+});
+const endPtr=e=>{ ptrs.delete(e.pointerId); if(ptrs.size<2) pinch0=null;
+  if(!ptrs.size) ZS.classList.remove('dragging'); };
+ZS.addEventListener('pointerup',endPtr); ZS.addEventListener('pointercancel',endPtr);
 </script>
 </body>
 </html>
